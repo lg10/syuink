@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  signal-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: syuink-signal
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      # Persist D1 database and Durable Objects data
+      - signal_data:/app/apps/signal-server/.wrangler
+    environment:
+      - NODE_ENV=production
+
+volumes:
+  signal_data:

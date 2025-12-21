@@ -1,0 +1,33 @@
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    font-family: "Microsoft YaHei", sans-serif;
+    user-select: none;
+}
+
+#root {
+    width: 100%;
+    height: 100%;
+    background-color: #f9f9f9;
+    border-radius: 10px;
+    overflow: hidden;
+    /* Border to define the window edge clearly */
+    border: 1px solid rgba(0,0,0,0.1);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+/* Hide scrollbars */
+::-webkit-scrollbar {
+    display: none;
+}
+
+/* Reset default button styles */
+button {
+    font-family: inherit;
+}

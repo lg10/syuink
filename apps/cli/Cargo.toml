@@ -1,0 +1,12 @@
+[package]
+name = "syuink-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+p2p-node = { path = "../../crates/p2p-node" }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { version = "4.4", features = ["derive"] }

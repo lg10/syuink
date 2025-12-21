@@ -1,0 +1,14 @@
+{
+  "name": "syuink-monorepo",
+  "version": "0.0.5",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "desktop": "npm run tauri dev --workspace=syuink-desktop",
+    "desktop:build": "npm run build --workspace=syuink-desktop",
+    "tauri": "npm run tauri --workspace=syuink-desktop",
+    "signal": "npm run dev --workspace=syuink-signal-server"
+  }
+}

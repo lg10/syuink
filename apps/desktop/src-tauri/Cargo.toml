@@ -1,0 +1,17 @@
+[package]
+name = "syuink-desktop"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.0.0-beta", features = [] }
+
+[dependencies]
+tauri = { version = "2.0.0-beta", features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+p2p-node = { path = "../../../crates/p2p-node" }
+tokio = { workspace = true }
+tauri-plugin-single-instance = { version = "2.3.6", features = ["deep-link"] }
+sysinfo = "0.37.2"
+uuid = { workspace = true, features = ["v4"] }

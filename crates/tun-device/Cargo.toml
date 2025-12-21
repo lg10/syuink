@@ -1,0 +1,15 @@
+[package]
+name = "tun-device"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tun = { workspace = true }
+bytes = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Windows specific dependencies if needed, though 'tun' handles wintun internally usually
