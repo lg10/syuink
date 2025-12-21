@@ -8,6 +8,8 @@
   "scripts": {
     "desktop": "npm run tauri dev --workspace=syuink-desktop",
     "desktop:build": "npm run build --workspace=syuink-desktop",
+    "package:win64": "npm run tauri build --workspace=syuink-desktop -- --target x86_64-pc-windows-msvc",
+    "package:win32": "npm run tauri build --workspace=syuink-desktop -- --target i686-pc-windows-msvc",
     "tauri": "npm run tauri --workspace=syuink-desktop",
     "signal": "npm run dev --workspace=syuink-signal-server"
   }
