@@ -71,6 +71,9 @@ export function VPNProvider({ children }: { children: ReactNode }) {
         const savedProxy = localStorage.getItem("syuink_global_proxy");
         if (savedProxy === "true") {
             setIsGlobalProxy(true);
+            invoke("set_proxy_mode_menu", { mode: "global" }).catch(console.error);
+        } else {
+            invoke("set_proxy_mode_menu", { mode: "rules" }).catch(console.error);
         }
 
         // Sync state from backend (for multi-window support)
@@ -259,6 +262,9 @@ export function VPNProvider({ children }: { children: ReactNode }) {
         // Save preference immediately
         localStorage.setItem("syuink_global_proxy", enable.toString());
         setIsGlobalProxy(enable);
+        
+        // Sync Menu UI
+        invoke("set_proxy_mode_menu", { mode: enable ? "global" : "rules" }).catch(console.error);
 
         if (isConnected && socks5Port > 0) {
             try {

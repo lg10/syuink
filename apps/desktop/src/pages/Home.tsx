@@ -43,6 +43,43 @@ function Home() {
     }
   }, [navigate]);
 
+  useEffect(() => {
+    // Listen for tray events
+    let unlistenFn: (() => void) | undefined;
+    
+    import("@tauri-apps/api/event").then(async ({ listen }) => {
+        const u1 = await listen('open-settings', () => openSettings());
+        const u2 = await listen('open-devices', () => openDevices());
+        const u3 = await listen('toggle-vpn', () => {
+             console.log("Tray toggle triggered");
+             document.getElementById('connect-btn')?.click();
+        });
+        
+        // Listen for mode change requests from Tray
+        const u4 = await listen('set-proxy-mode', (event) => {
+            const mode = event.payload as string;
+            console.log("Tray requested mode change:", mode);
+            if (mode === 'global') {
+                setGlobalProxy(true);
+            } else if (mode === 'rules') {
+                setGlobalProxy(false);
+            }
+        });
+        
+        unlistenFn = () => {
+            u1();
+            u2();
+            u3();
+            u4();
+        };
+    });
+
+    return () => {
+        if (unlistenFn) unlistenFn();
+    };
+  }, []); // Run once for setup? No, toggle needs fresh state. 
+  // Actually, clicking the button via ID is a safe hack to avoid closure issues without complex Ref
+
   const handleToggle = () => {
       if (isConnected) {
           disconnect();
@@ -126,8 +163,19 @@ function Home() {
   };
 
   const handleClose = async () => {
-      // Quit the entire application
-      invoke('quit_app');
+      // Close secondary windows first
+      try {
+          const settings = await WebviewWindow.getByLabel('settings');
+          if (settings) await settings.close();
+      } catch (e) {}
+      
+      try {
+          const devices = await WebviewWindow.getByLabel('devices');
+          if (devices) await devices.close();
+      } catch (e) {}
+
+      // Hide to tray instead of quitting
+      appWindow.hide();
   };
 
   return (
@@ -204,6 +252,7 @@ function Home() {
 
           {/* Connect Button */}
           <button 
+              id="connect-btn"
               onClick={handleToggle}
               disabled={isLoading || !deviceName}
               style={{

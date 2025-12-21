@@ -4,6 +4,11 @@ use p2p_node::{P2PNode, PeerInfo, NodeCommand};
 use p2p_node::signaling::ServiceDecl;
 use std::net::Ipv4Addr;
 use std::sync::Mutex;
+use tauri::{
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    Wry,
+};
 use tauri::Manager;
 use tauri::State;
 use tokio::sync::broadcast;
@@ -13,6 +18,9 @@ struct VpnState {
     current_ip: Mutex<Option<String>>,
     socks5_port: Mutex<Option<u16>>,
     command_tx: Mutex<Option<tokio::sync::mpsc::Sender<NodeCommand>>>,
+    menu_connected: Mutex<Option<CheckMenuItem<Wry>>>,
+    menu_rules: Mutex<Option<CheckMenuItem<Wry>>>,
+    menu_global: Mutex<Option<CheckMenuItem<Wry>>>,
 }
 
 use tauri::Emitter;
@@ -128,7 +136,7 @@ async fn start_vpn(
     // Wait for IP allocation (with timeout)
     // This makes start_vpn wait until the network is actually ready
     use tokio::time::{timeout, Duration};
-    let wait_result = timeout(Duration::from_secs(15), ip_report_rx.recv()).await;
+    let wait_result = timeout(Duration::from_secs(10), ip_report_rx.recv()).await;
     
     let (allocated_ip, socks5_port) = match wait_result {
         Ok(Some(info)) => info,
@@ -152,6 +160,21 @@ async fn start_vpn(
     
     let result = format!("{}|{}", allocated_ip, socks5_port);
     let _ = app.emit("vpn-connected", &result);
+    
+    // Update Tray Icon (Connected)
+    let _ = app.tray_by_id("main").map(|tray| {
+        let _ = tray.set_icon(Some(tauri::image::Image::from_bytes(include_bytes!("../icons/icon_connected.png")).unwrap()));
+        let _ = tray.set_tooltip(Some("Syuink VPN: 已连接"));
+    });
+
+    // Update menu check state via State
+    {
+        let connected_lock = state.menu_connected.lock().unwrap();
+        if let Some(item) = connected_lock.as_ref() {
+            let _ = item.set_checked(true);
+        }
+    }
+    
     Ok(result)
 }
 
@@ -279,6 +302,20 @@ async fn stop_vpn(app: tauri::AppHandle, state: State<'_, VpnState>) -> Result<S
         let _ = set_system_proxy(false, 0).await;
         
         let _ = app.emit("vpn-disconnected", ());
+        
+        // Update Tray Icon (Disconnected)
+        let _ = app.tray_by_id("main").map(|tray| {
+            let _ = tray.set_icon(Some(tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")).unwrap()));
+            let _ = tray.set_tooltip(Some("Syuink VPN: 未连接"));
+        });
+        
+        {
+            let connected_lock = state.menu_connected.lock().unwrap();
+            if let Some(item) = connected_lock.as_ref() {
+                let _ = item.set_checked(false);
+            }
+        }
+
         Ok("VPN 服务已停止".to_string())
     } else {
         Err("VPN 未运行".to_string())
@@ -312,6 +349,23 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+#[tauri::command]
+async fn set_proxy_mode_menu(state: State<'_, VpnState>, mode: String) -> Result<(), String> {
+    {
+        let rules_lock = state.menu_rules.lock().unwrap();
+        if let Some(item) = rules_lock.as_ref() {
+            let _ = item.set_checked(mode != "global");
+        }
+    }
+    {
+        let global_lock = state.menu_global.lock().unwrap();
+        if let Some(item) = global_lock.as_ref() {
+            let _ = item.set_checked(mode == "global");
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -322,8 +376,133 @@ fn main() {
             current_ip: Mutex::new(None),
             socks5_port: Mutex::new(None),
             command_tx: Mutex::new(None),
+            menu_connected: Mutex::new(None),
+            menu_rules: Mutex::new(None),
+            menu_global: Mutex::new(None),
         })
-        .invoke_handler(tauri::generate_handler![start_vpn, stop_vpn, get_hostname, update_services, set_system_proxy, get_vpn_status, quit_app])
+        .setup(|app| {
+            let show_i = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+            let sep1 = PredefinedMenuItem::separator(app)?;
+            
+            let connected_i = CheckMenuItem::with_id(app, "connected", "已连接", true, false, None::<&str>)?;
+            let sep2 = PredefinedMenuItem::separator(app)?;
+            
+            let mode_i = MenuItem::with_id(app, "mode_title", "代理规则", false, None::<&str>)?;
+            
+            // Rules and Global are mutually exclusive, but CheckMenuItem works fine. 
+            // We will manage their state manually. Default to Rules (checked).
+            let rules_i = CheckMenuItem::with_id(app, "mode_rules", "规则", true, true, None::<&str>)?;
+            
+            let global_i = CheckMenuItem::with_id(app, "mode_global", "全局", true, false, None::<&str>)?;
+            
+            // Re-using old menu items for now if needed, but based on image, we only need these + maybe quit?
+            // The image doesn't show quit, but usually it's there. User said "托盘菜单做成图片这样的", 
+            // but usually a quit is essential. I will keep quit at bottom as standard practice unless strictly forbidden.
+            // The user input image shows: Show Main, Connected, [Separator], Outbound Mode (disabled), [Separator], Rules (Checked), [Separator], Global.
+            // Wait, "Connected" is clickable? In previous prompt "连接/断开" was requested.
+            // Image says "已连接" with a checkmark. This implies it's a status indicator or toggle.
+            // Let's assume clicking "已连接" toggles connection.
+            
+            let sep_end = PredefinedMenuItem::separator(app)?;
+            let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+
+            // Store items in state
+            let state = app.state::<VpnState>();
+            {
+                let mut connected_lock = state.menu_connected.lock().unwrap();
+                *connected_lock = Some(connected_i.clone());
+            }
+            {
+                let mut rules_lock = state.menu_rules.lock().unwrap();
+                *rules_lock = Some(rules_i.clone());
+            }
+            {
+                let mut global_lock = state.menu_global.lock().unwrap();
+                *global_lock = Some(global_i.clone());
+            }
+
+            let menu = Menu::with_items(app, &[
+                &show_i,
+                &sep1,
+                &connected_i,
+                &sep2,
+                &mode_i,
+                &rules_i,
+                &global_i,
+                &sep_end,
+                &quit_i,
+            ])?;
+
+            let _tray = TrayIconBuilder::with_id("main")
+                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")).unwrap())
+                .menu(&menu)
+                .on_menu_event(|app, event| {
+                    let id = event.id.as_ref();
+                    match id {
+                        "quit" => {
+                            let app_handle = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                println!("Quitting application, cleaning up...");
+                                let state = app_handle.state::<VpnState>();
+                                
+                                // Send shutdown signal to VPN node if running
+                                let tx = {
+                                    let mut shutdown_tx = state.shutdown_tx.lock().unwrap();
+                                    shutdown_tx.take()
+                                };
+                                if let Some(tx) = tx {
+                                    let _ = tx.send(());
+                                }
+                                
+                                // Ensure system proxy is disabled
+                                let _ = set_system_proxy(false, 0).await;
+                                
+                                app_handle.exit(0);
+                            });
+                        }
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "connected" => {
+                            // Toggle VPN
+                            let _ = app.emit("toggle-vpn", ());
+                            // Check state will be updated by backend event "vpn-connected"/"vpn-disconnected"
+                        }
+                        "mode_rules" => {
+                            let _ = app.emit("set-proxy-mode", "rules");
+                            // Update UI state immediately via State
+                            let state = app.state::<VpnState>();
+                            let _ = set_proxy_mode_menu(state, "rules".to_string());
+                        }
+                        "mode_global" => {
+                            let _ = app.emit("set-proxy-mode", "global");
+                            let state = app.state::<VpnState>();
+                            let _ = set_proxy_mode_menu(state, "global".to_string());
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![start_vpn, stop_vpn, get_hostname, update_services, set_system_proxy, get_vpn_status, quit_app, set_proxy_mode_menu])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
