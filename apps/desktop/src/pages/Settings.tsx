@@ -165,9 +165,8 @@ function Settings() {
   return (
     <div style={{ display: 'flex', minHeight: '100%', fontFamily: '"Microsoft YaHei", sans-serif', backgroundColor: '#f9f9f9' }}>
       <div style={{ width: '200px', backgroundColor: 'white', borderRight: '1px solid #eee', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '20px', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={handleBack}>
-          <ArrowLeft size={20} />
-          <span style={{ fontWeight: 'bold' }}>返回</span>
+        <div style={{ padding: '20px', borderBottom: '1px solid #eee', fontSize: '18px', fontWeight: 'bold', color: '#333' }}>
+          设置
         </div>
         
         <div 

@@ -66,6 +66,32 @@ export function VPNProvider({ children }: { children: ReactNode }) {
                 localStorage.setItem("syuink_device_name", name as string);
             }).catch(console.error);
         }
+        
+        // Load Global Proxy state
+        const savedProxy = localStorage.getItem("syuink_global_proxy");
+        if (savedProxy === "true") {
+            setIsGlobalProxy(true);
+        }
+
+        // Sync state from backend (for multi-window support)
+        invoke("get_vpn_status").then((res) => {
+            const statusStr = res as string;
+            if (statusStr && statusStr.includes("|")) {
+                const parts = statusStr.split('|');
+                const ip = parts[0];
+                const portStr = parts[1];
+                const port = parseInt(portStr);
+                
+                if (ip && !isNaN(port)) {
+                    console.log("Synced VPN state from backend:", ip, port);
+                    setCurrentIp(ip);
+                    setSocks5Port(port);
+                    setStatus("已连接到网络");
+                    setIsConnected(true);
+                    setConnectedAt(Date.now()); // Approximate, backend doesn't store time yet
+                }
+            }
+        }).catch(console.error);
     }, []);
 
     // Listen for Backend Events
@@ -73,10 +99,31 @@ export function VPNProvider({ children }: { children: ReactNode }) {
         console.log("VPNProvider: Setting up event listeners");
         const unlistenConnected = listen('vpn-connected', (event) => {
             console.log("VPN Connected Event:", event.payload);
-            const ip = event.payload as string;
-            setCurrentIp(ip);
-            setStatus("已连接到网络");
-            setIsConnected(true);
+            const statusStr = event.payload as string;
+            if (statusStr && statusStr.includes("|")) {
+                const parts = statusStr.split('|');
+                const ip = parts[0];
+                const portStr = parts[1];
+                const port = parseInt(portStr);
+                
+                if (ip && !isNaN(port)) {
+                    setCurrentIp(ip);
+                    setSocks5Port(port);
+                    setStatus("已连接到网络");
+                    setIsConnected(true);
+                    setConnectedAt(Date.now());
+                }
+            }
+        });
+
+        const unlistenDisconnected = listen('vpn-disconnected', () => {
+            console.log("VPN Disconnected Event");
+            setStatus("VPN 服务已停止");
+            setIsConnected(false);
+            setCurrentIp("");
+            setSocks5Port(0);
+            setPeers([]);
+            setConnectedAt(undefined);
         });
 
         const unlistenPeers = listen('peers-updated', (event) => {
@@ -94,6 +141,7 @@ export function VPNProvider({ children }: { children: ReactNode }) {
 
         return () => {
             unlistenConnected.then(f => f());
+            unlistenDisconnected.then(f => f());
             unlistenPeers.then(f => f());
         };
     }, []);
@@ -208,17 +256,18 @@ export function VPNProvider({ children }: { children: ReactNode }) {
     };
 
     const setGlobalProxy = async (enable: boolean) => {
+        // Save preference immediately
+        localStorage.setItem("syuink_global_proxy", enable.toString());
+        setIsGlobalProxy(enable);
+
         if (isConnected && socks5Port > 0) {
             try {
                 await invoke("set_system_proxy", { enable: enable, port: socks5Port });
-                setIsGlobalProxy(enable);
             } catch (e) {
                 console.error("Failed to set system proxy:", e);
-                alert("设置全局代理失败: " + e);
+                // Revert state if failed? For now, keep preference but alert user
+                // alert("设置全局代理失败: " + e); 
             }
-        } else {
-            // Just update state if not connected, will apply on connect
-            setIsGlobalProxy(enable);
         }
     };
 

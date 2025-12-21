@@ -149,7 +149,10 @@ async fn start_vpn(
     // Return the IP and Port to frontend
     // We return JSON string for simplicity to avoid changing Tauri return type signature too much
     // Or just format it as "IP|Port"
-    Ok(format!("{}|{}", allocated_ip, socks5_port))
+    
+    let result = format!("{}|{}", allocated_ip, socks5_port);
+    let _ = app.emit("vpn-connected", &result);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -250,7 +253,7 @@ async fn update_services(
 }
 
 #[tauri::command]
-async fn stop_vpn(state: State<'_, VpnState>) -> Result<String, String> {
+async fn stop_vpn(app: tauri::AppHandle, state: State<'_, VpnState>) -> Result<String, String> {
     let tx = {
         let mut shutdown_tx = state.shutdown_tx.lock().unwrap();
         shutdown_tx.take()
@@ -275,10 +278,24 @@ async fn stop_vpn(state: State<'_, VpnState>) -> Result<String, String> {
         // Disable System Proxy
         let _ = set_system_proxy(false, 0).await;
         
+        let _ = app.emit("vpn-disconnected", ());
         Ok("VPN 服务已停止".to_string())
     } else {
         Err("VPN 未运行".to_string())
     }
+}
+
+#[tauri::command]
+fn get_vpn_status(state: State<'_, VpnState>) -> Result<String, String> {
+    let current_ip = state.current_ip.lock().unwrap();
+    let current_port = state.socks5_port.lock().unwrap();
+    
+    if let Some(ref ip) = *current_ip {
+        let port = current_port.unwrap_or(0);
+        return Ok(format!("{}|{}", ip, port));
+    }
+    
+    Ok("".to_string())
 }
 
 #[tauri::command]
@@ -288,6 +305,11 @@ fn get_hostname() -> String {
 
     #[cfg(not(target_os = "windows"))]
     return std::env::var("HOSTNAME").unwrap_or_else(|_| "Unknown Device".to_string());
+}
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
 }
 
 fn main() {
@@ -301,7 +323,7 @@ fn main() {
             socks5_port: Mutex::new(None),
             command_tx: Mutex::new(None),
         })
-        .invoke_handler(tauri::generate_handler![start_vpn, stop_vpn, get_hostname, update_services, set_system_proxy])
+        .invoke_handler(tauri::generate_handler![start_vpn, stop_vpn, get_hostname, update_services, set_system_proxy, get_vpn_status, quit_app])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

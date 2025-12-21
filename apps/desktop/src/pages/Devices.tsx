@@ -15,7 +15,7 @@ const formatDuration = (start?: number) => {
 
 function Devices() {
   const navigate = useNavigate();
-  const { peers, currentIp, deviceName, nodeId, isConnected, refreshPeers, connectedAt } = useVPN();
+  const { peers, currentIp, deviceName, nodeId, isConnected, refreshPeers, connectedAt, isGlobalProxy, setGlobalProxy } = useVPN();
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -27,6 +27,14 @@ function Devices() {
       if (isConnected) {
           refreshPeers();
       }
+      
+      const interval = setInterval(() => {
+          if (isConnected) {
+              refreshPeers();
+          }
+      }, 5000); // Poll every 5 seconds
+      
+      return () => clearInterval(interval);
   }, [isConnected]);
 
   if (!isConnected) {
@@ -34,7 +42,6 @@ function Devices() {
           <div style={{ padding: '40px', textAlign: 'center' }}>
               <h2>未连接</h2>
               <p>请先连接到网络查看设备</p>
-              <button onClick={() => navigate('/')}>返回首页</button>
           </div>
       )
   }
@@ -68,10 +75,7 @@ function Devices() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#f9f9f9', fontFamily: '"Microsoft YaHei", sans-serif' }}>
       
       {/* Header */}
-      <div style={{ padding: '20px', backgroundColor: 'white', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', gap: '15px' }}>
-        <div style={{ cursor: 'pointer' }} onClick={() => navigate('/')}>
-          <ArrowLeft size={24} />
-        </div>
+      <div style={{ padding: '20px', backgroundColor: 'white', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h1 style={{ margin: 0, fontSize: '20px' }}>设备管理 ({allDevices.length})</h1>
       </div>
 

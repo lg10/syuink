@@ -11,17 +11,14 @@ function App() {
   return (
     <ErrorBoundary>
       <VPNProvider>
-        <TitleBar />
-        <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
-          <Router>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/devices" element={<Devices />} />
-            </Routes>
-          </Router>
-        </div>
+        <Router>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/devices" element={<Devices />} />
+          </Routes>
+        </Router>
       </VPNProvider>
     </ErrorBoundary>
   );

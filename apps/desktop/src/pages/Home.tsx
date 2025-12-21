@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
-import { Settings, Users, Plus, Trash, Server, ChevronDown, ChevronUp, Globe } from "lucide-react";
+import { Settings, Globe, ChevronDown, ChevronUp, Zap, Minus, Square, X, Power, Monitor } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useVPN } from "../context/VPNContext";
 import { invoke } from "@tauri-apps/api/core";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 function Home() {
-  console.log("Rendering Home Component");
   const navigate = useNavigate();
   const { 
     isConnected, 
@@ -21,44 +22,26 @@ function Home() {
     setGlobalProxy
   } = useVPN();
 
-  console.log("Home State:", { isConnected, status, currentIp, socks5Port, peersCount: peers?.length, deviceName, isLoading });
-
   const [showServices, setShowServices] = useState(false);
   const [services, setServices] = useState<any[]>([]);
 
   useEffect(() => {
-    console.log("Home useEffect mounted");
     // Check login status
     const token = localStorage.getItem("syuink_user_token");
     if (!token) {
-        console.log("No token found, redirecting to login");
         navigate('/login');
     }
 
     const saved = localStorage.getItem("syuink_services");
-    console.log("Loaded services from localStorage:", saved);
     if (saved) {
         try {
             const parsed = JSON.parse(saved);
             if (Array.isArray(parsed)) {
                 setServices(parsed);
-            } else {
-                setServices([]);
             }
-        } catch(e) {
-            console.error("Failed to parse services:", e);
-            setServices([]);
-        }
+        } catch(e) {}
     }
   }, [navigate]);
-
-  const saveServices = async (newServices: any[]) => {
-      setServices(newServices);
-      localStorage.setItem("syuink_services", JSON.stringify(newServices));
-      if (isConnected) {
-          try { await invoke("update_services", { services: newServices }); } catch(e){}
-      }
-  };
 
   const handleToggle = () => {
       if (isConnected) {
@@ -68,225 +51,316 @@ function Home() {
       }
   };
 
+  const openSettings = async () => {
+      console.log("Opening settings...");
+      // Check if window exists
+      try {
+          const win = await WebviewWindow.getByLabel('settings');
+          if (win) {
+              console.log("Settings window exists, focusing");
+              await win.setFocus();
+              return;
+          }
+      } catch (e) {
+          console.error("Error checking settings window:", e);
+      }
+
+      console.log("Creating new settings window");
+      try {
+        const webview = new WebviewWindow('settings', {
+            url: '/#/settings',
+            title: '设置',
+            width: 600,
+            height: 500,
+            resizable: false,
+            decorations: true,
+            center: true
+        });
+        
+        webview.once('tauri://created', function () {
+            console.log('Settings window created');
+        });
+        
+        webview.once('tauri://error', function (e) {
+            console.error('Settings window creation error:', e);
+        });
+      } catch (e) {
+          console.error("Failed to create settings window:", e);
+      }
+  };
+
+  const openDevices = async () => {
+      try {
+          const win = await WebviewWindow.getByLabel('devices');
+          if (win) {
+              await win.setFocus();
+              return;
+          }
+      } catch (e) {}
+
+      const webview = new WebviewWindow('devices', {
+          url: '/#/devices',
+          title: '设备管理',
+          width: 900,
+          height: 700,
+          decorations: true,
+          center: true
+      });
+  };
+
+  const appWindow = getCurrentWindow();
+
+  const handleMinimize = async () => {
+      // Close secondary windows first
+      try {
+          const settings = await WebviewWindow.getByLabel('settings');
+          if (settings) await settings.close();
+      } catch (e) {}
+      
+      try {
+          const devices = await WebviewWindow.getByLabel('devices');
+          if (devices) await devices.close();
+      } catch (e) {}
+      
+      appWindow.minimize();
+  };
+
+  const handleClose = async () => {
+      // Quit the entire application
+      invoke('quit_app');
+  };
+
   return (
     <div style={{ 
+      height: '100vh',
       display: 'flex', 
       flexDirection: 'column', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
-      minHeight: '100%',
+      backgroundColor: 'white',
+      borderRadius: '12px', // Although window is transparent, this gives the card look
+      overflow: 'hidden',
       fontFamily: '"Microsoft YaHei", sans-serif',
-      backgroundColor: '#f0f2f5',
       color: '#333',
-      position: 'relative'
+      border: '1px solid #e0e0e0', // Light border
+      boxSizing: 'border-box'
     }}>
       
-      {/* Top Right Settings Icon */}
-      <div 
-        style={{ position: 'absolute', top: '20px', right: '20px', cursor: 'pointer', color: '#666' }}
-        onClick={() => navigate('/settings')}
-      >
-        <Settings size={24} />
+      {/* Title Bar / Drag Region */}
+      <div data-tauri-drag-region style={{ 
+          height: '40px', 
+          display: 'flex', 
+          justifyContent: 'flex-end', 
+          alignItems: 'center', 
+          paddingRight: '10px' 
+      }}>
+          <div style={{ display: 'flex', gap: '8px', zIndex: 9999 }}>
+              <Minus size={18} color="#666" style={{ cursor: 'pointer' }} onClick={handleMinimize} />
+              {/* Maximize usually not needed for this card style, but requested */}
+              {/* <Square size={16} color="#666" style={{ cursor: 'pointer' }} onClick={() => appWindow.toggleMaximize()} /> */}
+              <X size={18} color="#666" style={{ cursor: 'pointer' }} onClick={handleClose} />
+          </div>
       </div>
 
-      <div style={{
-        backgroundColor: 'white',
-        padding: '40px',
-        borderRadius: '12px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-        textAlign: 'center',
-        width: '320px'
-      }}>
-        <h1 style={{ margin: '0 0 10px 0', color: '#1a1a1a' }}>Syu.ink</h1>
-        <p style={{ margin: '0 0 30px 0', color: '#666', fontSize: '14px' }}>异地组网 · P2P 直连</p>
-        
-        <div style={{ 
-          marginBottom: '30px', 
-          height: '100px', 
+      {/* Main Content */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 20px' }}>
+          
+          {/* Title */}
+          <h1 style={{ fontSize: '32px', fontWeight: 'bold', margin: '10px 0 5px 0' }}>Syu.ink</h1>
+          <p style={{ color: '#999', fontSize: '14px', margin: '0 0 40px 0' }}>异地组网 · P2P 直连</p>
+
+          {/* Status Icon */}
+          <div style={{ marginBottom: '10px' }}>
+              {isConnected ? (
+                  <div style={{ 
+                      width: '60px', height: '60px', borderRadius: '50%', 
+                      backgroundColor: '#e6f7ea', display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                  }}>
+                      <div style={{ fontSize: '30px', color: '#28a745' }}>✓</div>
+                  </div>
+              ) : (
+                  <Zap size={48} style={{ fill: "url(#gradient)", stroke: "none" }} />
+              )}
+              {/* Gradient definition for the Zap icon */}
+              <svg width="0" height="0">
+                <linearGradient id="gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#ff9a44" />
+                  <stop offset="100%" stopColor="#ff6b6b" />
+                </linearGradient>
+              </svg>
+          </div>
+
+          <div style={{ color: '#ccc', fontSize: '14px', marginBottom: '40px' }}>
+              {isConnected ? "已连接" : "未连接"}
+          </div>
+
+          {/* Device Info */}
+          <div style={{ fontSize: '14px', marginBottom: '20px', color: '#333' }}>
+              当前设备: <span 
+                  onClick={openDevices}
+                  style={{ color: '#1677ff', fontWeight: 'bold', cursor: 'pointer', marginLeft: '5px' }}
+              >
+                  {deviceName || "Unknown"}
+              </span>
+          </div>
+
+          {/* Connect Button */}
+          <button 
+              onClick={handleToggle}
+              disabled={isLoading || !deviceName}
+              style={{
+                  width: '100%',
+                  height: '50px',
+                  backgroundColor: isConnected ? '#ff4d4f' : '#1677ff',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '18px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  marginBottom: '15px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px',
+                  opacity: (isLoading || !deviceName) ? 0.7 : 1
+              }}
+          >
+              {isLoading ? "处理中..." : (isConnected ? "断开连接" : "一键连接")}
+          </button>
+
+          {/* Global Proxy Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginBottom: '20px' }}>
+             <span style={{ fontSize: '14px', color: '#666' }}>全局代理</span>
+             <div 
+                 onClick={() => setGlobalProxy(!isGlobalProxy)}
+                 style={{
+                     width: '40px',
+                     height: '20px',
+                     backgroundColor: isGlobalProxy ? '#1677ff' : '#ccc',
+                     borderRadius: '10px',
+                     position: 'relative',
+                     cursor: 'pointer',
+                     transition: 'background-color 0.3s'
+                 }}
+             >
+                 <div style={{
+                     width: '16px',
+                     height: '16px',
+                     backgroundColor: 'white',
+                     borderRadius: '50%',
+                     position: 'absolute',
+                     top: '2px',
+                     left: isGlobalProxy ? '22px' : '2px',
+                     transition: 'left 0.3s'
+                 }} />
+             </div>
+          </div>
+
+          {/* Services Dropdown Pill */}
+          <div style={{ width: '100%' }}>
+              <div 
+                  onClick={() => setShowServices(!showServices)}
+                  style={{
+                      backgroundColor: '#f5f5f5',
+                      borderRadius: '8px',
+                      padding: '12px 15px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      cursor: 'pointer',
+                      color: '#555',
+                      fontSize: '14px'
+                  }}
+              >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <Globe size={18} />
+                      <span>共享服务 ({services.length})</span>
+                  </div>
+                  {showServices ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+              </div>
+
+              {/* Service List (Collapsible) */}
+              {showServices && (
+                  <div style={{ 
+                      marginTop: '10px', 
+                      backgroundColor: '#fff', 
+                      border: '1px solid #eee', 
+                      borderRadius: '8px', 
+                      padding: '10px',
+                      fontSize: '12px',
+                      maxHeight: '120px',
+                      overflowY: 'auto'
+                  }}>
+                      {services.length === 0 ? (
+                          <div style={{ color: '#999', textAlign: 'center' }}>暂无共享服务</div>
+                      ) : (
+                          services.map((s, i) => (
+                              <div key={i} style={{ padding: '5px 0', borderBottom: '1px solid #f0f0f0' }}>
+                                  {s.ip}:{s.port} ({s.protocol})
+                              </div>
+                          ))
+                      )}
+                  </div>
+              )}
+          </div>
+
+      </div>
+
+      {/* Footer / Status Bar */}
+      <div style={{ 
+          padding: '15px 20px', 
+          borderTop: '1px solid #f0f0f0', 
           display: 'flex', 
           alignItems: 'center', 
-          justifyContent: 'center' 
-        }}>
-          {isConnected ? (
-            <div style={{ color: '#28a745' }}>
-              <div style={{ fontSize: '48px', marginBottom: '10px' }}>✓</div>
-              <div style={{ fontWeight: 'bold' }}>{deviceName}</div>
-              {currentIp ? (
-                  <div style={{ fontSize: '14px', marginTop: '5px', fontFamily: 'monospace' }}>IP: {currentIp}</div>
-              ) : (
-                  <div style={{ fontSize: '12px', marginTop: '5px', color: '#999' }}>正在获取 IP...</div>
-              )}
-            </div>
-          ) : (
-             <div style={{ color: '#ccc' }}>
-              <div style={{ fontSize: '48px', marginBottom: '10px' }}>⚡</div>
-              <div>未连接</div>
-            </div>
-          )}
-        </div>
+          justifyContent: 'center',
+          position: 'relative',
+          fontSize: '12px',
+          color: '#999'
+      }}>
+          {/* Settings Button (Left) */}
+          <div 
+              onClick={openSettings}
+              style={{ 
+                  position: 'absolute', 
+                  left: '20px', 
+                  cursor: 'pointer',
+                  padding: '5px',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+          >
+              <Settings size={20} color="#666" />
+          </div>
 
-        {!isConnected && (
-            <div style={{ marginBottom: '20px', fontSize: '14px', color: '#666' }}>
-                当前设备: <strong>{deviceName}</strong>
-            </div>
-        )}
+          {/* Status Text (Center) */}
+          <div>
+              状态: {status}
+          </div>
 
-        <button 
-          style={{ 
-            padding: '12px 0', 
-            width: '100%',
-            cursor: (isLoading || (!deviceName && !isConnected)) ? 'not-allowed' : 'pointer', 
-            backgroundColor: isConnected ? '#dc3545' : '#007bff', 
-            color: 'white', 
-            border: 'none', 
-            borderRadius: '6px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            transition: 'background 0.2s',
-            opacity: (isLoading || (!deviceName && !isConnected)) ? 0.6 : 1
-          }}
-          disabled={isLoading || (!deviceName && !isConnected)}
-          onClick={handleToggle}
-        >
-          {isLoading ? "处理中..." : (isConnected ? "断开连接" : "一键连接")}
-        </button>
-
-        {isConnected && (
-            <button
-                onClick={() => navigate('/devices')}
-                style={{
-                    marginTop: '15px',
-                    width: '100%',
-                    padding: '10px',
-                    backgroundColor: 'white',
-                    border: '1px solid #ddd',
-                    borderRadius: '6px',
-                    color: '#333',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px'
-                }}
-            >
-                <Users size={16} />
-                设备管理 ({Array.isArray(peers) ? peers.length + 1 : 1})
-            </button>
-        )}
-
-        {isConnected && (
-            <div style={{ marginTop: '10px', fontSize: '12px', color: '#555', backgroundColor: '#e9ecef', padding: '8px', borderRadius: '6px', textAlign: 'left' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <strong>SOCKS5 代理:</strong>
-                    <span style={{ fontFamily: 'monospace', background: '#fff', padding: '2px 6px', borderRadius: '4px' }}>127.0.0.1:{socks5Port}</span>
-                </div>
-                <div style={{ fontSize: '10px', color: '#888', marginTop: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span>配置此代理以实现 TCP 直连 (SSH, HTTP)</span>
-                </div>
-                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #ddd', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                     <input 
-                        type="checkbox" 
-                        id="global_proxy" 
-                        checked={isGlobalProxy} 
-                        onChange={(e) => setGlobalProxy(e.target.checked)}
-                        style={{ cursor: 'pointer' }}
-                     />
-                     <label htmlFor="global_proxy" style={{ cursor: 'pointer', fontWeight: 'bold' }}>启用全局系统代理</label>
-                </div>
-            </div>
-        )}
-
-        {/* Service Management */}
-        <div style={{ marginTop: '15px', width: '100%' }}>
-            <div 
-                onClick={() => setShowServices(!showServices)}
-                style={{ 
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
-                    padding: '10px', backgroundColor: '#f8f9fa', borderRadius: '6px', 
-                    cursor: 'pointer', fontSize: '14px', color: '#555'
-                }}
-            >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Globe size={16} />
-                    <span>共享服务 ({services.length})</span>
-                </div>
-                {showServices ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </div>
-
-            {showServices && (
-                <div style={{ 
-                    marginTop: '5px', padding: '10px', backgroundColor: '#fff', 
-                    border: '1px solid #eee', borderRadius: '6px', textAlign: 'left' 
-                }}>
-                    {/* List */}
-                    <div style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '10px' }}>
-                        {Array.isArray(services) && services.map((s, idx) => {
-                            if (!s || typeof s !== 'object') return null;
-                            const proto = typeof s.protocol === 'string' ? s.protocol : 'both';
-                            return (
-                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px', paddingBottom: '5px', borderBottom: '1px solid #f0f0f0' }}>
-                                    <div>
-                                        <span style={{ fontWeight: 'bold' }}>{s.ip}:{s.port}</span>
-                                        <span style={{ marginLeft: '5px', color: '#666', backgroundColor: '#eee', padding: '1px 4px', borderRadius: '3px', fontSize: '10px' }}>{proto.toUpperCase()}</span>
-                                        <span style={{ marginLeft: '5px', color: '#888' }}>{s.service_type === 'printer' ? '打印机' : '通用'}</span>
-                                    </div>
-                                    <Trash size={14} color="#dc3545" style={{ cursor: 'pointer' }} onClick={() => {
-                                        const next = [...services];
-                                        next.splice(idx, 1);
-                                        saveServices(next);
-                                    }} />
-                                </div>
-                            );
-                        })}
-                        {services.length === 0 && <div style={{ color: '#999', fontSize: '12px', textAlign: 'center' }}>暂无共享服务</div>}
-                    </div>
-
-                    {/* Add Simple Form */}
-                    <div style={{ display: 'flex', gap: '5px' }}>
-                        <input id="quick_ip" placeholder="IP" style={{ width: '35%', padding: '4px', fontSize: '12px' }} />
-                        <input id="quick_port" placeholder="Port" style={{ width: '20%', padding: '4px', fontSize: '12px' }} />
-                        <select id="quick_proto" style={{ width: '20%', padding: '4px', fontSize: '12px' }}>
-                            <option value="both">TCP/UDP</option>
-                            <option value="tcp">TCP</option>
-                            <option value="udp">UDP</option>
-                        </select>
-                        <select id="quick_type" style={{ width: '25%', padding: '4px', fontSize: '12px' }}>
-                            <option value="generic">通用</option>
-                            <option value="printer">打印机</option>
-                        </select>
-                        <button onClick={() => {
-                            const ip = (document.getElementById('quick_ip') as HTMLInputElement).value;
-                            const port = (document.getElementById('quick_port') as HTMLInputElement).value;
-                            const proto = (document.getElementById('quick_proto') as HTMLSelectElement).value;
-                            const type = (document.getElementById('quick_type') as HTMLSelectElement).value;
-                            
-                            if(ip && port) {
-                                saveServices([...services, { 
-                                    ip, 
-                                    port: parseInt(port), 
-                                    protocol: proto, 
-                                    service_type: type, 
-                                    description: '' 
-                                }]);
-                                (document.getElementById('quick_ip') as HTMLInputElement).value = '';
-                                (document.getElementById('quick_port') as HTMLInputElement).value = '';
-                            }
-                        }} style={{ flex: 1, padding: '0', cursor: 'pointer', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px' }}>+</button>
-                    </div>
-                </div>
-            )}
-        </div>
-
-        <div style={{ 
-          marginTop: '20px', 
-          fontSize: '12px', 
-          color: '#888',
-          borderTop: '1px solid #eee',
-          paddingTop: '15px'
-        }}>
-          状态: {status}
-        </div>
+          {/* Devices Button (Right) */}
+          <div 
+              onClick={openDevices}
+              style={{ 
+                  position: 'absolute', 
+                  right: '20px', 
+                  cursor: 'pointer',
+                  padding: '5px',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              title="设备管理"
+          >
+              <Monitor size={20} color="#666" />
+          </div>
       </div>
+
     </div>
   );
 }
