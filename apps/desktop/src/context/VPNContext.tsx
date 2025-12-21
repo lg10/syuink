@@ -12,6 +12,7 @@ export interface PeerInfo {
     device_type?: string;
     is_gateway?: boolean;
     connected_at?: number;
+    isSelf?: boolean;
 }
 
 interface VPNContextType {
@@ -21,6 +22,7 @@ interface VPNContextType {
     socks5Port: number;
     peers: PeerInfo[];
     nodeId: string;
+    deviceName: string;
     setDeviceName: (name: string) => void;
     connect: () => Promise<void>;
     disconnect: () => Promise<void>;
