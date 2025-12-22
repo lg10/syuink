@@ -1,5 +1,9 @@
 # Syuink - 下一代 P2P Mesh VPN 与远程互联工具
 
+<p align="center">
+  <img src="apps/desktop/src-tauri/icons/128x128.png" alt="Syuink Logo" width="128" height="128" />
+</p>
+
 ![Syuink Banner](https://img.shields.io/badge/Status-Beta-blue?style=for-the-badge) ![Rust](https://img.shields.io/badge/Rust-Enabled-orange?style=for-the-badge&logo=rust) ![Tauri](https://img.shields.io/badge/Tauri-v2-blueviolet?style=for-the-badge&logo=tauri) ![React](https://img.shields.io/badge/React-Framework-61DAFB?style=for-the-badge&logo=react) ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
 **Syuink** 是一款基于 **Rust** 和 **Tauri v2** 构建的现代化、高性能异地组网（Mesh VPN）解决方案。
