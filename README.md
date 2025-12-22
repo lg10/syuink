@@ -6,7 +6,7 @@
 
 它旨在通过 P2P 直连技术，将分布在世界各地的设备连接到同一个虚拟局域网中，实现安全、低延迟的互联互通。无论是远程办公、家庭 NAS 访问、还是跨地域游戏联机，Syuink 都能提供“像在局域网一样”的体验。
 
-[📖 查看中文使用手册 (User Manual)](MANUAL_ZH.md) | [🔌 信令服务器 API 文档](SIGNALING_API.md)
+[📖 查看详细中文手册 (User Manual)](MANUAL_ZH.md) | [🔌 信令服务器 API 文档](SIGNALING_API.md) | [☁️ 服务器部署指南](SERVER_DEPLOY.md)
 
 ---
 
@@ -49,7 +49,7 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/your-username/syuink.git
+git clone https://github.com/lg10/syuink.git
 cd syuink
 
 # 2. 安装依赖
