@@ -369,7 +369,10 @@ async fn set_proxy_mode_menu(state: State<'_, VpnState>, mode: String) -> Result
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            let _ = app.get_webview_window("main").expect("no main window").set_focus();
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
         }))
         .manage(VpnState {
             shutdown_tx: Mutex::new(None),

@@ -27,6 +27,12 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "icon": []
+    "icon": [],
+    "resources": ["wintun.dll"],
+    "windows": {
+      "wix": {
+        "language": "en-US"
+      }
+    }
   }
 }
