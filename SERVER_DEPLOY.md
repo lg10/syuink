@@ -96,7 +96,7 @@ curl -fsSL https://raw.githubusercontent.com/lg10/syuink/main/scripts/install_se
 
 1.  **获取代码**:
     ```bash
-    git clone https://github.com/your-username/syuink.git
+    git clone https://github.com/lg10/syuink.git
     cd syuink/apps/signal-server
     ```
 
