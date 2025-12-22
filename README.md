@@ -1,53 +1,108 @@
-# Syuink - P2P Mesh VPN & Remote Control
+# Syuink - 下一代 P2P Mesh VPN 与远程互联工具
 
-Syuink 是一款基于 Rust 和 Tauri 构建的现代化异地组网（Mesh VPN）与远程控制解决方案。
+![Syuink Banner](https://img.shields.io/badge/Status-Beta-blue?style=for-the-badge) ![Rust](https://img.shields.io/badge/Rust-Enabled-orange?style=for-the-badge&logo=rust) ![Tauri](https://img.shields.io/badge/Tauri-v2-blueviolet?style=for-the-badge&logo=tauri) ![React](https://img.shields.io/badge/React-Framework-61DAFB?style=for-the-badge&logo=react) ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
-**[📖 中文使用手册与技术文档 (User Manual)](MANUAL_ZH.md)**
+**Syuink** 是一款基于 **Rust** 和 **Tauri v2** 构建的现代化、高性能异地组网（Mesh VPN）解决方案。
 
-## 特性 (Features)
+它旨在通过 P2P 直连技术，将分布在世界各地的设备连接到同一个虚拟局域网中，实现安全、低延迟的互联互通。无论是远程办公、家庭 NAS 访问、还是跨地域游戏联机，Syuink 都能提供“像在局域网一样”的体验。
 
-*   **P2P Mesh 组网**: 使用 QUIC/WebRTC 协议直连，低延迟。
-*   **分布式服务网格**: 去中心化架构，任意设备均可声明并共享局域网服务 (IP/Port)。
-*   **虚拟局域网**: 将异地设备连接在同一虚拟网段。
-*   **服务发现与 UDP 穿透**: 支持 mDNS (Bonjour)、SSDP、UDP 游戏联机、打印机共享。
-*   **TCP 直连 (SOCKS5)**: 内置 SOCKS5 代理，支持 SSH、HTTP 等 TCP 服务的隧道传输。
-*   **跨平台**: Windows, macOS, Linux (移动端计划中)。
+[📖 查看中文使用手册 (User Manual)](MANUAL_ZH.md) | [🔌 信令服务器 API 文档](SIGNALING_API.md)
 
-## 开发环境 (Prerequisites)
+---
 
-### Windows
-1.  **Rust**: [rustup.rs](https://rustup.rs/)
-2.  **Node.js**: [nodejs.org](https://nodejs.org/)
-3.  **C++ Build Tools**: Visual Studio Installer -> "Desktop development with C++"
-4.  **Wintun**: 需要 `wintun.dll` (通常自动处理)。
+## ✨ 核心特性 (Features)
 
-### macOS / Linux
-1.  **Rust** & **Node.js**
-2.  **依赖**:
-    *   Linux: `sudo apt install libwebkit2gtk-4.0-dev build-essential curl wget libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev`
+*   **🚀 极致性能**: 基于 Rust 编写的核心网络栈，内存占用极低，吞吐量极高。
+*   **🕸️ P2P Mesh 组网**: 优先尝试 UDP P2P 直连（NAT 穿透），无法直连时自动回退中继，确保连接通畅。
+*   **🛡️ 安全隐私**: 全链路加密传输，去中心化设计，您的数据只属于您自己。
+*   **🖥️ 轻量级 GUI**: 基于 Tauri v2 + React 构建的现代化界面，Windows 安装包仅数 MB。
+*   **🔌 多模式代理**:
+    *   **TUN 模式**: 全局虚拟网卡，支持 UDP/ICMP 协议透明传输（如游戏联机、打印机发现）。
+    *   **SOCKS5 模式**: 内置代理服务器，支持 TCP 协议（如 SSH、Web、NAS），可配合系统代理使用。
+*   **🌍 跨平台支持**: 
+    *   **Windows**: 完美支持 (Win10/Win11, x64/x86)。
+    *   **macOS / Linux**: 核心功能兼容 (正在完善 GUI 适配)。
+    *   **Headless CLI**: 适用于服务器和无头设备的命令行版本。
 
-## 项目结构 (Project Structure)
+## 🛠️ 技术栈 (Tech Stack)
 
-*   `apps/desktop`: 主程序 (Tauri GUI + Frontend)。
-*   `apps/cli`: 命令行版本 (适用于无头服务器)。
-*   `apps/signal-server`: 信令服务器 (Cloudflare Workers / Node.js)。
-*   `crates/p2p-node`: 核心网络库 (TUN, NAT, SOCKS5, Signaling)。
-*   `crates/tun-device`: 虚拟网卡封装。
+*   **Frontend**: React, TypeScript, TailwindCSS, Vite
+*   **Backend (Desktop)**: Tauri v2, Rust
+*   **Core Networking**: 
+    *   `tokio` (异步运行时)
+    *   `quinn` (QUIC 协议)
+    *   `tun` (虚拟设备驱动)
+    *   `smoltcp` (用户态 TCP/IP 栈)
 
-## 运行指南 (How to Run)
+## 🚀 快速开始 (Getting Started)
 
-### 运行桌面端 (GUI)
+### 前置要求 (Prerequisites)
+
+1.  **Rust**: [安装 Rust](https://rustup.rs/)
+2.  **Node.js**: (推荐 v18+, 使用 pnpm 或 npm)
+3.  **构建工具**:
+    *   **Windows**: 安装 Visual Studio C++ 生成工具 (Desktop development with C++)。
+    *   **macOS**: `xcode-select --install`
+    *   **Linux**: `sudo apt install build-essential libwebkit2gtk-4.0-dev ...`
+
+### 开发运行 (Development)
 
 ```bash
-cd apps/desktop
+# 1. 克隆项目
+git clone https://github.com/your-username/syuink.git
+cd syuink
+
+# 2. 安装依赖
 npm install
-npm run tauri dev
+
+# 3. 启动开发环境 (同时启动前端和 Rust 后端)
+# 注意：Windows 上会自动请求管理员权限，请在弹出的 UAC 窗口中点击“是”
+npm run dev
 ```
 
-### 运行 CLI (Headless)
+### 生产构建 (Build)
+
+构建独立的安装包或可执行文件：
 
 ```bash
-cargo run -p syuink-cli -- --ip 10.10.0.2 --mask 255.255.255.0
+# 构建 Windows 64位 安装包
+npm run package:win64
+
+# 仅构建 Windows 可执行文件 (无安装包)
+npm run desktop:exe
 ```
 
-> **注意**: 必须以 **管理员 (Administrator)** 或 `sudo` 权限运行以创建虚拟网卡。
+> **⚠️ Windows 构建注意事项**: 
+> 1. 构建生成的 `.exe` 文件位于 `target/release/syuink-desktop.exe`。
+> 2. 运行该程序必须确保同目录下存在 `wintun.dll` 文件（可从 `apps/desktop/src-tauri/wintun.dll` 复制）。
+> 3. 程序必须以 **管理员身份 (Run as Administrator)** 运行才能创建虚拟网卡。
+
+## 📂 项目结构 (Project Structure)
+
+本项目采用 Monorepo 结构：
+
+*   `apps/`
+    *   `desktop/`: 桌面端主程序 (Tauri + React)。
+    *   `cli/`: 纯命令行版本，适用于服务器部署。
+    *   `signal-server/`: 信令服务器 (用于节点发现和握手)。
+*   `crates/`
+    *   `p2p-node/`: **核心库**。包含 P2P 握手、NAT 穿透、加密通信、虚拟网络栈逻辑。
+    *   `tun-device/`: 跨平台 TUN 设备抽象层。
+
+## 🤝 贡献 (Contributing)
+
+欢迎提交 Issue 和 Pull Request！
+
+1.  Fork 本仓库。
+2.  创建您的特性分支 (`git checkout -b feature/AmazingFeature`)。
+3.  提交您的更改 (`git commit -m 'Add some AmazingFeature'`)。
+4.  推送到分支 (`git push origin feature/AmazingFeature`)。
+5.  开启一个 Pull Request。
+
+## 📄 许可证 (License)
+
+本项目基于 **MIT License** 开源。详情请参阅 [LICENSE](LICENSE) 文件。
+
+---
+
+**Syuink** - Connect Freely, Securely, Everywhere.
