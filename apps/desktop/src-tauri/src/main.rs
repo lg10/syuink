@@ -47,8 +47,18 @@ async fn start_vpn(
     }
 
     // Collect System Info
-    let os = sysinfo::System::name();
-    let version = sysinfo::System::os_version();
+    use sysinfo::System;
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    
+    let os = if cfg!(target_os = "macos") {
+        Some("macOS".to_string())
+    } else if cfg!(target_os = "windows") {
+        Some("Windows".to_string())
+    } else {
+        System::name()
+    };
+    let version = System::os_version();
     let device_type = Some("desktop".to_string());
     let my_meta = (os, version, device_type, is_gateway);
 
@@ -94,10 +104,10 @@ async fn start_vpn(
         }
     });
     
-    // Spawn the VPN node
-    // We use a channel to communicate the allocated IP back to the main thread
-    let (result_tx, mut result_rx) = tokio::sync::mpsc::channel(1);
+    // Create a channel to wait for the node's background task result
+    let (node_result_tx, mut node_result_rx) = tokio::sync::mpsc::channel(1);
     
+    // Spawn the VPN node
     tauri::async_runtime::spawn(async move {
         println!("Initializing P2P Node...");
         
@@ -120,62 +130,77 @@ async fn start_vpn(
         // Construct Signaling URL with Token
         let base_url = server_url.unwrap_or_else(|| "ws://127.0.0.1:8787".to_string());
         
+        println!("Starting P2P Node with Signaling URL: {}", base_url);
+
         // Pass token separately to node.start, do NOT append it to base_url query
-        match node.start(rx, Some(ip_report_tx), Some(peer_update_tx), base_url, token, my_id, my_meta, services, cmd_rx).await {
+        let result = node.start(rx, Some(ip_report_tx), Some(peer_update_tx), base_url, token, my_id, my_meta, services, cmd_rx).await;
+        
+        match result {
             Ok((allocated_ip, _port)) => {
-                println!("VPN Node finished/stopped. Last IP: {}", allocated_ip);
-                let _ = result_tx.send(Ok(allocated_ip)).await;
+                println!("VPN Node finished/stopped successfully. Last IP: {}", allocated_ip);
+                let _ = node_result_tx.send(Ok(allocated_ip)).await;
             },
             Err(e) => {
+                // IMPORTANT: Log to stderr so user sees it in terminal
                 eprintln!("VPN Node CRITICAL ERROR: {:?}", e);
-                let _ = result_tx.send(Err(e.to_string())).await;
+                
+                // Get a user-friendly error string
+                let error_msg = if format!("{:?}", e).contains("Operation not permitted") {
+                    "权限不足: 即使使用了 sudo，系统仍拒绝创建虚拟网卡。请检查是否有其他 VPN 正在运行。".to_string()
+                } else {
+                    format!("VPN 启动失败: {:?}", e)
+                };
+                
+                let _ = node_result_tx.send(Err(error_msg)).await;
             },
         }
     });
     
-    // Wait for IP allocation (with timeout)
-    // This makes start_vpn wait until the network is actually ready
-    use tokio::time::{timeout, Duration};
-    let wait_result = timeout(Duration::from_secs(10), ip_report_rx.recv()).await;
+    // Wait for IP allocation or node crash
+    use tokio::time::Duration;
     
-    let (allocated_ip, socks5_port) = match wait_result {
-        Ok(Some(info)) => info,
-        Ok(None) => return Err("Failed to allocate IP (Channel closed)".to_string()),
-        Err(_) => return Err("Timeout waiting for IP allocation".to_string()),
-    };
-
-    println!("VPN successfully started with IP: {}, SOCKS5 Port: {}", allocated_ip, socks5_port);
-
-    // Update state 
-    {
-        let mut current = state.current_ip.lock().unwrap();
-        *current = Some(allocated_ip.clone());
-        let mut port = state.socks5_port.lock().unwrap();
-        *port = Some(socks5_port);
-    }
-
-    // Return the IP and Port to frontend
-    // We return JSON string for simplicity to avoid changing Tauri return type signature too much
-    // Or just format it as "IP|Port"
-    
-    let result = format!("{}|{}", allocated_ip, socks5_port);
-    let _ = app.emit("vpn-connected", &result);
-    
-    // Update Tray Icon (Connected)
-    let _ = app.tray_by_id("main").map(|tray| {
-        let _ = tray.set_icon(Some(tauri::image::Image::from_bytes(include_bytes!("../icons/icon_connected.png")).unwrap()));
-        let _ = tray.set_tooltip(Some("Syuink VPN: 已连接"));
-    });
-
-    // Update menu check state via State
-    {
-        let connected_lock = state.menu_connected.lock().unwrap();
-        if let Some(item) = connected_lock.as_ref() {
-            let _ = item.set_checked(true);
+    tokio::select! {
+        ip_info = ip_report_rx.recv() => {
+            match ip_info {
+                Some((allocated_ip, socks5_port)) => {
+                    println!("VPN successfully started with IP: {}, SOCKS5 Port: {}", allocated_ip, socks5_port);
+                    // Update state 
+                    {
+                        let mut current = state.current_ip.lock().unwrap();
+                        *current = Some(allocated_ip.clone());
+                        let mut port = state.socks5_port.lock().unwrap();
+                        *port = Some(socks5_port);
+                    }
+                    let result = format!("{}|{}", allocated_ip, socks5_port);
+                    let _ = app.emit("vpn-connected", &result);
+                    
+                    // Update Tray Icon
+                    let _ = app.tray_by_id("main").map(|tray| {
+                        let _ = tray.set_icon(Some(tauri::image::Image::from_bytes(include_bytes!("../icons/icon_connected.png")).unwrap()));
+                        let _ = tray.set_tooltip(Some("Syuink VPN: 已连接"));
+                    });
+                    
+                    {
+                        let connected_lock = state.menu_connected.lock().unwrap();
+                        if let Some(item) = connected_lock.as_ref() {
+                            let _ = item.set_checked(true);
+                        }
+                    }
+                    Ok(result)
+                }
+                None => Err("IP 分配失败: 核心节点已意外关闭".to_string())
+            }
+        }
+        node_err = node_result_rx.recv() => {
+            match node_err {
+                Some(Err(e)) => Err(e),
+                _ => Err("VPN 启动失败: 核心进程退出".to_string())
+            }
+        }
+        _ = tokio::time::sleep(Duration::from_secs(15)) => {
+            Err("连接超时: 等待 IP 分配超过 15 秒".to_string())
         }
     }
-    
-    Ok(result)
 }
 
 #[tauri::command]
@@ -335,12 +360,58 @@ fn get_vpn_status(state: State<'_, VpnState>) -> Result<String, String> {
     Ok("".to_string())
 }
 
+#[derive(serde::Serialize)]
+struct SystemInfo {
+    os: String,
+    version: String,
+    hostname: String,
+}
+
+#[tauri::command]
+fn get_system_info() -> SystemInfo {
+    use sysinfo::System;
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    
+    let os = if cfg!(target_os = "macos") {
+        "macOS".to_string()
+    } else if cfg!(target_os = "windows") {
+        "Windows".to_string()
+    } else {
+        System::name().unwrap_or_else(|| "Unknown".to_string())
+    };
+    
+    SystemInfo {
+        os,
+        version: System::os_version().unwrap_or_default(),
+        hostname: get_hostname(),
+    }
+}
+
 #[tauri::command]
 fn get_hostname() -> String {
     #[cfg(target_os = "windows")]
     return std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Unknown Device".to_string());
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, scutil --get ComputerName is the most user-friendly name
+        use std::process::Command;
+        let output = Command::new("scutil")
+            .args(&["--get", "ComputerName"])
+            .output();
+        
+        if let Ok(out) = output {
+            let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !name.is_empty() {
+                return name;
+            }
+        }
+        // Fallback to HOSTNAME env
+        std::env::var("HOSTNAME").unwrap_or_else(|_| "Mac Device".to_string())
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     return std::env::var("HOSTNAME").unwrap_or_else(|_| "Unknown Device".to_string());
 }
 
@@ -367,6 +438,34 @@ async fn set_proxy_mode_menu(state: State<'_, VpnState>, mode: String) -> Result
 }
 
 fn main() {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        use std::env;
+
+        // Check if we are running as root
+        let uid = unsafe { libc::getuid() };
+        if uid != 0 {
+            println!("Not running as root, attempting to relaunch with sudo...");
+            let args: Vec<String> = env::args().collect();
+            let current_exe = env::current_exe().expect("Failed to get current exe path");
+            
+            // Re-run with sudo
+            let status = Command::new("sudo")
+                .arg(current_exe)
+                .args(&args[1..])
+                .status();
+            
+            match status {
+                Ok(s) if s.success() => std::process::exit(0),
+                _ => {
+                    eprintln!("Failed to get root privileges. Application may not function correctly.");
+                    // Continue anyway, but expect failure later
+                }
+            }
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
@@ -505,7 +604,7 @@ fn main() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_vpn, stop_vpn, get_hostname, update_services, set_system_proxy, get_vpn_status, quit_app, set_proxy_mode_menu])
+        .invoke_handler(tauri::generate_handler![start_vpn, stop_vpn, get_hostname, get_system_info, update_services, set_system_proxy, get_vpn_status, quit_app, set_proxy_mode_menu])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

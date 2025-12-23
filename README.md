@@ -10,7 +10,7 @@
 
 它旨在通过 P2P 直连技术，将分布在世界各地的设备连接到同一个虚拟局域网中，实现安全、低延迟的互联互通。无论是远程办公、家庭 NAS 访问、还是跨地域游戏联机，Syuink 都能提供“像在局域网一样”的体验。
 
-[📖 查看详细中文手册 (User Manual)](MANUAL_ZH.md) | [🔌 信令服务器 API 文档](SIGNALING_API.md) | [☁️ 服务器部署指南](SERVER_DEPLOY.md)
+[📖 查看详细中文手册 (User Manual)](MANUAL_ZH.md) | [🕒 修改历史](CHANGELOG.md) | [🔌 信令服务器 API 文档](SIGNALING_API.md) | [☁️ 服务器部署指南](SERVER_DEPLOY.md)
 
 ---
 

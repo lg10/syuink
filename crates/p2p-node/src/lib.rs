@@ -166,11 +166,18 @@ impl P2PNode {
         // Incoming TCP Streams (Target Side): (SourcePeerID, StreamID) -> Sender<Data>
         let mut incoming_tcp: HashMap<(String, u32), tokio::sync::mpsc::Sender<Vec<u8>>> = HashMap::new();
 
+        // Try to start SOCKS5 server, fallback to random port if 1080 is taken
         let (socks5_server, socks5_port) = match Socks5Server::new(1080).await {
             Ok((s, p)) => (Arc::new(s), p),
-            Err(e) => {
-                error!("Failed to start SOCKS5 server: {}", e);
-                panic!("SOCKS5 Server init failed: {}", e);
+            Err(_) => {
+                warn!("Port 1080 is taken, trying to allocate a random port for SOCKS5...");
+                match Socks5Server::new(0).await {
+                    Ok((s, p)) => (Arc::new(s), p),
+                    Err(e) => {
+                        error!("Failed to start SOCKS5 server even on random port: {}", e);
+                        return Err(anyhow::anyhow!("SOCKS5 Server init failed: {}", e));
+                    }
+                }
             }
         };
 
@@ -295,7 +302,7 @@ impl P2PNode {
                                 let _ = writer.write(&raw).await;
                             }
                         }
-                        SignalMessage::TunPacket { source, data, .. } => {
+                        SignalMessage::TunPacket { source: _, data, .. } => {
                              if let Ok(raw) = BASE64.decode(&data) {
                                  let mut writer = tun_writer.lock().await;
                                  let _ = writer.write(&raw).await;

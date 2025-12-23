@@ -16,8 +16,12 @@ impl TunDevice {
         config
             .address(ip)
             .netmask(netmask)
-            .name("Syuink") // Simple name to avoid issues
             .up();
+
+        // On macOS, explicitly naming the device can cause conflicts if the name is already taken.
+        // It's better to let the OS assign the next available utunX device.
+        #[cfg(not(target_os = "macos"))]
+        config.name("Syuink");
 
         #[cfg(target_os = "linux")]
         config.platform(|config| {

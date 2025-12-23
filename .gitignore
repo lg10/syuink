@@ -1,3 +1,8 @@
 node_modules
 target
 *.tar
+
+# Locks and project specific data
+Cargo.lock
+package-lock.json
+.codebuddy/

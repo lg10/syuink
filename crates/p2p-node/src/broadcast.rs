@@ -2,7 +2,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 use anyhow::Result;
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
 
 const MDNS_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 const MDNS_PORT: u16 = 5353;
@@ -76,19 +76,37 @@ impl BroadcastReflector {
 fn create_multicast_socket(multicast_addr: Ipv4Addr, port: u16) -> Result<UdpSocket> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
     
-    // Allow reusing the port so we can coexist with system services (Avahi/Bonjour)
-    #[cfg(not(target_os = "windows"))]
-    socket.set_reuse_address(true)?;
-    #[cfg(target_os = "windows")]
-    socket.set_reuse_address(true)?; // Windows treats reuse_address like SO_REUSEADDR in *nix
+    // 1. 设置地址重用，允许共用端口
+    let _ = socket.set_reuse_address(true);
+    
+    // 2. 在 Unix 系统（如 macOS/Linux）上尝试设置端口重用，以共享系统级端口（如 5353）
+    // 使用 Ext trait 提供的原生设置方法
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = socket.as_raw_fd();
+        unsafe {
+            let optval: libc::c_int = 1;
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_REUSEPORT,
+                &optval as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+        }
+    }
 
-    // Bind to ANY address
-    socket.bind(&SocketAddr::from(([0, 0, 0, 0], port)).into())?;
+    // 3. 尝试绑定端口
+    // 如果是 mDNS 或 SSDP 关键端口且绑定失败，我们会尝试随机端口作为兜底（虽然效果会打折扣，但能防止崩溃）
+    if let Err(e) = socket.bind(&SocketAddr::from(([0, 0, 0, 0], port)).into()) {
+        warn!("Failed to bind to multicast port {}: {}. Attempting random port...", port, e);
+        socket.bind(&SocketAddr::from(([0, 0, 0, 0], 0)).into())?;
+    }
 
-    // Join the multicast group
+    // 4. 加入组播组
     socket.join_multicast_v4(&multicast_addr, &Ipv4Addr::UNSPECIFIED)?;
-    socket.set_multicast_loop_v4(true)?; // We want to hear ourselves? Usually no, but for testing maybe.
-
+    socket.set_multicast_loop_v4(true)?;
     socket.set_nonblocking(true)?;
 
     Ok(UdpSocket::from_std(socket.into())?)

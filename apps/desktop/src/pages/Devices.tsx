@@ -15,7 +15,7 @@ const formatDuration = (start?: number) => {
 
 function Devices() {
   const navigate = useNavigate();
-  const { peers, currentIp, deviceName, nodeId, isConnected, refreshPeers, connectedAt, isGlobalProxy, setGlobalProxy } = useVPN();
+  const { peers, currentIp, deviceName, deviceOs, deviceVersion, nodeId, isConnected, refreshPeers, connectedAt, isGlobalProxy, setGlobalProxy } = useVPN();
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -58,8 +58,8 @@ function Devices() {
           ip: currentIp, 
           isSelf: true,
           is_gateway: isSelfGateway,
-          os: "Windows", // Assuming current context, ideally get from invoke
-          version: "",
+          os: deviceOs || (navigator.platform.includes("Mac") ? "macOS" : "Windows"), 
+          version: deviceVersion,
           device_type: "desktop",
           connected_at: connectedAt
       },

@@ -2633,6 +2633,7 @@ dependencies = [
  "etherparse",
  "futures",
  "ipnetwork",
+ "libc",
  "quinn",
  "rustls 0.23.35",
  "serde",
@@ -4134,6 +4135,7 @@ dependencies = [
 name = "syuink-desktop"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "p2p-node",
  "serde",
  "serde_json",

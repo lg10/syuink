@@ -23,6 +23,8 @@ interface VPNContextType {
     peers: PeerInfo[];
     nodeId: string;
     deviceName: string;
+    deviceOs: string;
+    deviceVersion: string;
     setDeviceName: (name: string) => void;
     connect: () => Promise<void>;
     disconnect: () => Promise<void>;
@@ -43,6 +45,8 @@ export function VPNProvider({ children }: { children: ReactNode }) {
     const [socks5Port, setSocks5Port] = useState(0);
     const [peers, setPeers] = useState<PeerInfo[]>([]);
     const [deviceName, setDeviceName] = useState("");
+    const [deviceOs, setDeviceOs] = useState("");
+    const [deviceVersion, setDeviceVersion] = useState("");
     const [nodeId, setNodeId] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [isGlobalProxy, setIsGlobalProxy] = useState(false);
@@ -59,15 +63,31 @@ export function VPNProvider({ children }: { children: ReactNode }) {
         }
         setNodeId(nid);
 
-        const savedName = localStorage.getItem("syuink_device_name");
-        if (savedName) {
-            setDeviceName(savedName);
-        } else {
-            invoke("get_hostname").then((name) => {
-                setDeviceName(name as string);
-                localStorage.setItem("syuink_device_name", name as string);
-            }).catch(console.error);
-        }
+        // Fetch System Info (Hostname, OS, Version)
+        invoke("get_system_info").then((info: any) => {
+            setDeviceOs(info.os);
+            setDeviceVersion(info.version);
+            
+            const savedName = localStorage.getItem("syuink_device_name");
+            if (savedName) {
+                setDeviceName(savedName);
+            } else {
+                setDeviceName(info.hostname);
+                localStorage.setItem("syuink_device_name", info.hostname);
+            }
+        }).catch(err => {
+            console.error("Failed to get system info:", err);
+            // Fallback for name if get_system_info fails
+            const savedName = localStorage.getItem("syuink_device_name");
+            if (savedName) {
+                setDeviceName(savedName);
+            } else {
+                invoke("get_hostname").then((name) => {
+                    setDeviceName(name as string);
+                    localStorage.setItem("syuink_device_name", name as string);
+                }).catch(console.error);
+            }
+        });
         
         // Load Global Proxy state
         const savedProxy = localStorage.getItem("syuink_global_proxy");
@@ -287,6 +307,8 @@ export function VPNProvider({ children }: { children: ReactNode }) {
             socks5Port,
             peers,
             deviceName,
+            deviceOs,
+            deviceVersion,
             nodeId,
             setDeviceName,
             connect,
