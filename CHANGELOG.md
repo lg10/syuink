@@ -6,6 +6,13 @@
 - **后端 (Rust/Tauri)**:
     - 新增 `get_system_info` 命令，用于获取本机的操作系统名称、版本号和主机名。
     - 定义了 `SystemInfo` 结构体并在 `main.rs` 中注册了该命令。
+- **前端 (React/Context)**:
+    - 更新 `VPNContext.tsx`，在 context 中增加了 `deviceOs` 和 `deviceVersion` 状态，并自动同步系统信息。
+    - 更新 `Devices.tsx` 页面，展示本机的真实系统版本。
+    - 首页连接状态面板新增虚拟 IP 与 SOCKS5 代理地址 (`127.0.0.1:port`) 的直观显示。
+- **项目管理**:
+    - 更新 `.gitignore`，忽略 `Cargo.lock`、`package-lock.json` 以及 `.codebuddy/` 文件夹。
+    - 更新 `MANUAL_ZH.md`，增加了详细的平台差异与功能实现对比表。
 - **macOS 适配**:
     - 实现了 macOS 下的权限自动提升逻辑（若非 root 运行则尝试通过 `sudo` 重新启动）。
     - 优化了 macOS 的主机名获取方式，优先使用 `scutil --get ComputerName` 获取用户友好名称。

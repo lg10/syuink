@@ -236,8 +236,13 @@ function Home() {
               </svg>
           </div>
 
-          <div style={{ color: '#ccc', fontSize: '14px', marginBottom: '40px' }}>
-              {isConnected ? "已连接" : "未连接"}
+          <div style={{ color: '#ccc', fontSize: '14px', marginBottom: '40px', textAlign: 'center' }}>
+              <div>{isConnected ? "已连接" : "未连接"}</div>
+              {isConnected && currentIp && (
+                  <div style={{ fontSize: '12px', marginTop: '5px', color: '#1677ff', fontFamily: 'monospace' }}>
+                      虚拟 IP: {currentIp} | SOCKS5 代理: 127.0.0.1:{socks5Port}
+                  </div>
+              )}
           </div>
 
           {/* Device Info */}

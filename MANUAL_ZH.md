@@ -44,7 +44,7 @@ Syuink 是一款基于 Rust 和 Tauri 构建的现代化异地组网（Mesh VPN�
 | **SOCKS5 代理服务器** | ✅ 已实现 | ✅ 已实现 | ✅ 已实现 |
 | **系统代理自动配置** | ✅ 注册表修改 | ✅ `networksetup` | ❌ 待实现 |
 | **权限自动提升 (Root)** | ✅ UAC 弹窗 | ✅ `sudo` 重启逻辑 | ❌ 待实现 |
-| **主机名自动获取** | ✅ `COMPUTERNAME` | ✅ `scutil` 友好名称 | ✅ `HOSTNAME` |
+| **主机名自动获取** | ✅ `COMPUTERNAME` | ✅ `scutil` 名称 | ✅ `HOSTNAME` |
 | **分布式服务声明 (Gateway)** | ✅ 已实现 | ✅ 已实现 | ✅ 已实现 |
 | **UDP 广播/多播反射** | ✅ 已实现 | ⚠️ 基础支持 | ❌ 待实现 |
 | **透明 TCP (Raw TCP)** | ❌ 待实现 | ❌ 待实现 | ❌ 待实现 |
