@@ -33,6 +33,7 @@ async fn start_vpn(
     node_id: Option<String>,
     token: Option<String>,
     server_url: Option<String>,
+    ip: Option<String>,
     is_gateway: bool,
     services: Vec<ServiceDecl>
 ) -> Result<String, String> {
@@ -68,8 +69,8 @@ async fn start_vpn(
     
     println!("Request to start VPN for device: {} (ID: {})", name, my_id);
     
-    // Always start from .2 and let auto-discovery find the next free IP
-    let start_ip_str = "10.10.0.2"; 
+    // Use provided IP or default to .2
+    let start_ip_str = ip.unwrap_or_else(|| "10.10.0.2".to_string()); 
     
     let ip_addr: Ipv4Addr = start_ip_str.parse().map_err(|e| format!("IP格式错误: {}", e))?;
     let mask: Ipv4Addr = "255.255.255.0".parse().unwrap();

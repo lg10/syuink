@@ -69,11 +69,17 @@ export default {
 				}
 			}
 
-			// Forward to DO
-			const id = env.SIGNAL_ROOM.idFromName(groupId);
-            console.log(`[DO] Accessing Room ID: ${id.toString()}`);
-			const obj = env.SIGNAL_ROOM.get(id);
-			return obj.fetch(request);
+		// Forward to DO
+		const id = env.SIGNAL_ROOM.idFromName(groupId);
+        console.log(`[DO] Accessing Room ID: ${id.toString()}`);
+		const obj = env.SIGNAL_ROOM.get(id);
+
+        if (url.pathname.endsWith('/allocate_ip')) {
+             return obj.fetch(request);
+        }
+
+		return obj.fetch(request);
+
 		}
 
 		return new Response('Syuink Signaling Server Running', { 
@@ -161,6 +167,29 @@ export class SignalRoom {
 			}
             console.log(`[API] Returning ${devices.length} devices`);
 			return new Response(JSON.stringify(devices), {
+				headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+			});
+		}
+
+		if (url.pathname.endsWith('/allocate_ip')) {
+			const usedIps = new Set<string>();
+			for (const [_, meta] of this.sessions) {
+				if (meta.ip) usedIps.add(meta.ip);
+			}
+			
+			// Find next free IP in 10.10.0.x starting from .2
+			let allocated = "";
+			for (let i = 2; i < 255; i++) {
+				const candidate = `10.10.0.${i}`;
+				if (!usedIps.has(candidate)) {
+					allocated = candidate;
+					break;
+				}
+			}
+			
+			if (!allocated) return new Response('No available IPs', { status: 507, headers: { "Access-Control-Allow-Origin": "*" } });
+			
+			return new Response(JSON.stringify({ ip: allocated }), {
 				headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
 			});
 		}

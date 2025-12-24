@@ -215,8 +215,22 @@ export function VPNProvider({ children }: { children: ReactNode }) {
             // Auto-detect gateway mode
             const isGateway = services.length > 0;
 
+            // Allocate unique IP from server
+            let allocatedIp = null;
+            try {
+                const httpUrl = getHttpBaseUrl();
+                const ipRes = await fetch(`${httpUrl}/api/group/${token}/allocate_ip`);
+                if (ipRes.ok) {
+                    const ipData = await ipRes.json();
+                    allocatedIp = ipData.ip;
+                    console.log("Allocated IP from server:", allocatedIp);
+                }
+            } catch (e) {
+                console.warn("Failed to allocate IP from server, falling back to local auto-discovery:", e);
+            }
+
             const res = await invoke("start_vpn", { 
-                ip: null, 
+                ip: allocatedIp, 
                 deviceName: deviceName,
                 nodeId: nodeId,
                 token: token,
