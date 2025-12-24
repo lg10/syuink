@@ -180,17 +180,30 @@ function Home() {
 
   return (
     <div style={{ 
-      height: '100vh',
-      display: 'flex', 
-      flexDirection: 'column', 
-      backgroundColor: 'white',
-      borderRadius: '12px', // Although window is transparent, this gives the card look
-      overflow: 'hidden',
-      fontFamily: '"Microsoft YaHei", sans-serif',
-      color: '#333',
-      border: '1px solid #e0e0e0', // Light border
-      boxSizing: 'border-box'
+        width: '100vw', 
+        height: '100vh', 
+        backgroundColor: 'transparent', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        overflow: 'hidden',
+        pointerEvents: 'none'
     }}>
+        <div style={{ 
+          height: '600px',
+          width: '360px',
+          display: 'flex', 
+          flexDirection: 'column', 
+          backgroundColor: 'white',
+          borderRadius: '16px',
+          overflow: 'hidden',
+          fontFamily: '"Microsoft YaHei", sans-serif',
+          color: '#333',
+          boxSizing: 'border-box',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.25)', // 更加深邃的自定义圆角阴影
+          border: '1px solid rgba(0,0,0,0.08)',
+          pointerEvents: 'auto'
+        }}>
       
       {/* Title Bar / Drag Region */}
       <div data-tauri-drag-region style={{ 
@@ -362,7 +375,7 @@ function Home() {
       {/* Footer / Status Bar */}
       <div style={{ 
           padding: '15px 20px', 
-          borderTop: '1px solid #f0f0f0', 
+          
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: 'center',
@@ -415,6 +428,7 @@ function Home() {
           </div>
       </div>
 
+      </div>
     </div>
   );
 }

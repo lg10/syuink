@@ -1,25 +1,13 @@
-html, body {
+html, body, #root {
     margin: 0;
     padding: 0;
     width: 100%;
     height: 100%;
-    background: transparent;
+    /* background-color: rgba(195, 158, 158, 0) !important; */
+    background: transparent !important;
     overflow: hidden;
     font-family: "Microsoft YaHei", sans-serif;
     user-select: none;
-}
-
-#root {
-    width: 100%;
-    height: 100%;
-    /* Let individual pages handle background and border-radius */
-    /* background-color: #f9f9f9; */
-    /* border-radius: 10px; */
-    /* overflow: hidden; */
-    /* border: 1px solid rgba(0,0,0,0.1); */
-    display: flex;
-    flex-direction: column;
-    position: relative;
 }
 
 /* Hide scrollbars */

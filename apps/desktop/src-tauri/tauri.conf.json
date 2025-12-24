@@ -10,14 +10,17 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
         "title": "Syuink VPN",
-        "width": 360,
-        "height": 600,
+        "width": 420,
+        "height": 660,
         "decorations": false,
-        "transparent": true
+        "transparent": true,
+        "shadow": false,
+        "visible": false
       }
     ],
     "security": {

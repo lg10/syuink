@@ -214,18 +214,15 @@ async fn set_system_proxy(enable: bool, port: u16) -> Result<(), String> {
 
         if enable {
              println!("Enabling System Proxy on 127.0.0.1:{}", port);
-             // 1. Enable Proxy
              let _ = Command::new("reg")
                  .args(&["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f"])
                  .creation_flags(CREATE_NO_WINDOW)
                  .output();
-             // 2. Set Proxy Server
              let proxy_server = format!("socks=127.0.0.1:{}", port);
              let _ = Command::new("reg")
                  .args(&["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyServer", "/t", "REG_SZ", "/d", &proxy_server, "/f"])
                  .creation_flags(CREATE_NO_WINDOW)
                  .output();
-             // 3. Set Proxy Override (Bypass local)
              let _ = Command::new("reg")
                  .args(&["add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyOverride", "/t", "REG_SZ", "/d", "<local>", "/f"])
                  .creation_flags(CREATE_NO_WINDOW)
@@ -238,23 +235,35 @@ async fn set_system_proxy(enable: bool, port: u16) -> Result<(), String> {
                  .output();
         }
         
-        // Notify system (This is a bit hacky via PowerShell, ideally call InternetSetOption)
-        // This PS command forces a refresh of settings
+        // Refresh
         let _ = Command::new("powershell")
             .args(&["-Command", "$mk = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'; $v = (Get-ItemProperty -Path $mk).ProxyEnable; Set-ItemProperty -Path $mk -Name ProxyEnable -Value $v"])
             .creation_flags(CREATE_NO_WINDOW)
             .output();
-            
-        Ok(())
+        
+        // Verify
+        let verify = Command::new("reg")
+            .args(&["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyEnable"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+        if let Ok(out) = verify {
+            let ok = if enable {
+                String::from_utf8_lossy(&out.stdout).contains("0x1")
+            } else {
+                !String::from_utf8_lossy(&out.stdout).contains("0x1")
+            };
+            if ok {
+                return Ok(());
+            }
+        }
+        Err("系统代理设置校验失败".to_string())
     }
 
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
-        // Get active network service (Wi-Fi or Ethernet)
-        // Simplified: Try "Wi-Fi" then "Ethernet"
         let services = ["Wi-Fi", "Ethernet", "Thunderbolt Bridge"];
-        
+        let mut applied = false;
         for service in services {
             if enable {
                  let _ = Command::new("networksetup")
@@ -268,13 +277,33 @@ async fn set_system_proxy(enable: bool, port: u16) -> Result<(), String> {
                      .args(&["-setsocksfirewallproxystate", service, "off"])
                      .output();
             }
+            // verify per service
+            let verify = Command::new("networksetup")
+                .args(&["-getsocksfirewallproxy", service])
+                .output();
+            if let Ok(out) = verify {
+                let text = String::from_utf8_lossy(&out.stdout).to_string();
+                let enabled = text.contains("Enabled: Yes");
+                let server_ok = text.contains("Server: 127.0.0.1");
+                let port_ok = text.contains(&format!("Port: {}", port));
+                if enable {
+                    if enabled && server_ok && port_ok {
+                        applied = true;
+                        break;
+                    }
+                } else {
+                    if !enabled {
+                        applied = true;
+                        break;
+                    }
+                }
+            }
         }
-        Ok(())
+        if applied { Ok(()) } else { Err("系统代理设置校验失败".to_string()) }
     }
 
     #[cfg(target_os = "linux")]
     {
-        // Linux is complex (GNOME vs KDE). Just log for now.
         println!("System proxy setting not fully supported on Linux yet.");
         Ok(())
     }
@@ -484,6 +513,27 @@ fn main() {
             menu_global: Mutex::new(None),
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Manager;
+                use objc2::msg_send;
+                
+                if let Some(window) = app.get_webview_window("main") {
+                    unsafe {
+                        let ns_window = window.ns_window().unwrap() as *mut objc2::runtime::AnyObject;
+                        
+                        // 强制透明化逻辑
+                        let _: () = msg_send![ns_window, setOpaque: false];
+                        let _: () = msg_send![ns_window, setHasShadow: false];
+                        
+                        let cls = objc2::runtime::AnyClass::get("NSColor").unwrap();
+                        let clear_color: *mut objc2::runtime::AnyObject = msg_send![cls, clearColor];
+                        let _: () = msg_send![ns_window, setBackgroundColor: clear_color];
+                    }
+                    let _ = window.show();
+                }
+            }
+
             let show_i = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
             let sep1 = PredefinedMenuItem::separator(app)?;
             

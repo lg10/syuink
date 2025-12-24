@@ -145,18 +145,38 @@ export class SignalRoom {
         replaced?: boolean 
     }>;
 	services: Map<string, any[]>; // PeerID -> List of ServiceDecl
+    ipLeases: Map<string, { id?: string, ts: number }>; // ip -> lease info
 
 	constructor(state: DurableObjectState, env: Env) {
 		this.state = state;
 		this.sessions = new Map();
 		this.services = new Map();
+        this.ipLeases = new Map();
 	}
 
 	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
 
 		// Handle API request to list devices
+		// Authorization helper: expect Bearer <groupId>
+        const leaseTtlMs = 10 * 60 * 1000;
+		const parts = url.pathname.split('/');
+		const groupId = parts.length > 3 ? parts[3] : '';
+		const authHeader = request.headers.get('Authorization') || '';
+		const expectedBearer = `Bearer ${groupId}`;
+		const authorized = !!groupId && authHeader === expectedBearer;
+
+        const pruneLeases = () => {
+            const now = Date.now();
+            for (const [ip, lease] of this.ipLeases) {
+                if (now - lease.ts > leaseTtlMs) {
+                    this.ipLeases.delete(ip);
+                }
+            }
+        };
+
 		if (url.pathname.endsWith('/devices')) {
+            if (!authorized) return new Response('Unauthorized', { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
             console.log(`[API] Listing devices. Total sessions: ${this.sessions.size}`);
 			const devices = [];
 			for (const [_, meta] of this.sessions) {
@@ -172,10 +192,15 @@ export class SignalRoom {
 		}
 
 		if (url.pathname.endsWith('/allocate_ip')) {
+            if (!authorized) return new Response('Unauthorized', { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+            pruneLeases();
 			const usedIps = new Set<string>();
 			for (const [_, meta] of this.sessions) {
 				if (meta.ip) usedIps.add(meta.ip);
 			}
+            for (const ip of this.ipLeases.keys()) {
+                usedIps.add(ip);
+            }
 			
 			// Find next free IP in 10.10.0.x starting from .2
 			let allocated = "";
@@ -183,6 +208,7 @@ export class SignalRoom {
 				const candidate = `10.10.0.${i}`;
 				if (!usedIps.has(candidate)) {
 					allocated = candidate;
+                    this.ipLeases.set(candidate, { id: `lease:${groupId}`, ts: Date.now() });
 					break;
 				}
 			}
@@ -211,6 +237,11 @@ export class SignalRoom {
 			this.handleMessage(server, event.data);
 		});
 
+        const clamp = (val: any, maxLen = 128) => {
+            if (typeof val !== 'string') return '';
+            return val.slice(0, maxLen);
+        };
+
 		server.addEventListener('close', () => {
             try {
                 const meta = this.sessions.get(server);
@@ -226,6 +257,10 @@ export class SignalRoom {
                         this.services.delete(meta.id);
                         this.broadcastServiceUpdate();
                     }
+                }
+                // Release IP lease
+                if (meta && meta.ip && this.ipLeases.has(meta.ip)) {
+                    this.ipLeases.delete(meta.ip);
                 }
                 this.sessions.delete(server);
                 console.log('WebSocket connection closed. Total sessions:', this.sessions.size);
@@ -250,18 +285,32 @@ export class SignalRoom {
 				const senderId = msg.id;
 				const newServices = msg.services; // Array of ServiceDecl
 
-				// Simple Conflict Detection (First Come First Serve)
-				// Except printers/discovery
-				let conflict = false;
-				for (const newSvc of newServices) {
-					if (newSvc.service_type === 'printer' || newSvc.service_type === 'discovery') continue;
+                const ipRegex = /^\d{1,3}(?:\.\d{1,3}){3}$/;
 
+                const normalizeProtocol = (p: string) => {
+                    if (!p) return '';
+                    const val = (p as string).toLowerCase();
+                    if (val === 'tcp' || val === 'udp' || val === 'both') return val;
+                    return '';
+                };
+
+				let conflict = false;
+                let invalid = false;
+				for (const newSvc of newServices) {
+                    // basic validation
+                    if (!newSvc || !newSvc.ip || !ipRegex.test(newSvc.ip)) { invalid = true; break; }
+                    if (!newSvc.port || newSvc.port < 1 || newSvc.port > 65535) { invalid = true; break; }
+                    const proto = normalizeProtocol(newSvc.protocol);
+                    if (!proto) { invalid = true; break; }
+                    newSvc.protocol = proto;
+
+                    // conflict detection: any existing same ip+port regardless protocol
 					for (const [pid, svcs] of this.services) {
 						if (pid === senderId) continue;
 						for (const existing of svcs) {
-							if (existing.ip === newSvc.ip && 
-								existing.port === newSvc.port && 
-								existing.protocol === newSvc.protocol) {
+							const exProto = normalizeProtocol(existing.protocol || '');
+							const samePort = existing.ip === newSvc.ip && existing.port === newSvc.port;
+							if (samePort && exProto) {
 								conflict = true;
 								break;
 							}
@@ -271,8 +320,12 @@ export class SignalRoom {
 					if (conflict) break;
 				}
 
+                if (invalid) {
+                    console.warn(`Service registration rejected (invalid fields) for ${senderId}`);
+                    return;
+                }
+
 				if (conflict) {
-					// Send error (Optional)
 					console.warn(`Service conflict detected for ${senderId}`);
 					return;
 				}
@@ -304,15 +357,19 @@ export class SignalRoom {
 				}
 
 				const meta = { 
-                    id: msg.id, 
-                    ip: msg.ip, 
-                    name: msg.name,
-                    os: msg.os,
-                    version: msg.version,
-                    device_type: msg.device_type,
-                    is_gateway: msg.is_gateway,
+                    id: clamp(msg.id), 
+                    ip: clamp(msg.ip, 32), 
+                    name: clamp(msg.name),
+                    os: clamp(msg.os),
+                    version: clamp(msg.version),
+                    device_type: clamp(msg.device_type, 32),
+                    is_gateway: !!msg.is_gateway,
                     connected_at: Date.now()
                 };
+                if (meta.ip) {
+                    pruneLeases();
+                    this.ipLeases.set(meta.ip, { id: meta.id, ts: Date.now() });
+                }
 				this.sessions.set(sender, meta);
 				console.log(`Peer Joined: ${meta.name} (${meta.ip}) - OS: ${meta.os}`);
 

@@ -164,7 +164,32 @@ export function VPNProvider({ children }: { children: ReactNode }) {
             }
         });
 
+        const healthInterval = setInterval(async () => {
+            try {
+                const statusStr = await invoke("get_vpn_status") as string;
+                if (!statusStr || !statusStr.includes("|")) {
+                    setIsConnected(false);
+                    setCurrentIp("");
+                    setSocks5Port(0);
+                    setPeers([]);
+                    setConnectedAt(undefined);
+                    return;
+                }
+                const parts = statusStr.split('|');
+                const ip = parts[0];
+                const port = parseInt(parts[1]);
+                if (ip && !isNaN(port)) {
+                    setCurrentIp(ip);
+                    setSocks5Port(port);
+                    setIsConnected(true);
+                }
+            } catch (e) {
+                console.warn("Health check failed", e);
+            }
+        }, 10000);
+
         return () => {
+            clearInterval(healthInterval);
             unlistenConnected.then(f => f());
             unlistenDisconnected.then(f => f());
             unlistenPeers.then(f => f());
@@ -181,7 +206,11 @@ export function VPNProvider({ children }: { children: ReactNode }) {
         const url = `${httpUrl}/api/group/${token}/devices`;
 
         try {
-            const res = await fetch(url);
+            const res = await fetch(url, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
             if (res.ok) {
                 const data = await res.json();
                 console.log("Refreshed peers from API:", data);
@@ -219,7 +248,11 @@ export function VPNProvider({ children }: { children: ReactNode }) {
             let allocatedIp = null;
             try {
                 const httpUrl = getHttpBaseUrl();
-                const ipRes = await fetch(`${httpUrl}/api/group/${token}/allocate_ip`);
+                const ipRes = await fetch(`${httpUrl}/api/group/${token}/allocate_ip`, {
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                });
                 if (ipRes.ok) {
                     const ipData = await ipRes.json();
                     allocatedIp = ipData.ip;
@@ -307,11 +340,14 @@ export function VPNProvider({ children }: { children: ReactNode }) {
                 await invoke("set_system_proxy", { enable: enable, port: socks5Port });
             } catch (e) {
                 console.error("Failed to set system proxy:", e);
-                // Revert state if failed? For now, keep preference but alert user
-                // alert("设置全局代理失败: " + e); 
+                // Revert preference
+                localStorage.setItem("syuink_global_proxy", (!enable).toString());
+                setIsGlobalProxy(!enable);
+                invoke("set_proxy_mode_menu", { mode: enable ? "rules" : "global" }).catch(console.error);
             }
         }
     };
+
 
     return (
         <VPNContext.Provider value={{
