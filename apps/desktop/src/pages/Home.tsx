@@ -180,30 +180,18 @@ function Home() {
 
   return (
     <div style={{ 
-        width: '100vw', 
-        height: '100vh', 
-        backgroundColor: 'transparent', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center',
-        overflow: 'hidden',
-        pointerEvents: 'none'
+      height: '100vh',
+      width: '100vw',
+      display: 'flex', 
+      flexDirection: 'column', 
+      backgroundColor: 'white',
+      borderRadius: '16px',
+      overflow: 'hidden',
+      fontFamily: '"Microsoft YaHei", sans-serif',
+      color: '#333',
+      boxSizing: 'border-box',
+      border: '1px solid rgba(0,0,0,0.05)'
     }}>
-        <div style={{ 
-          height: '600px',
-          width: '360px',
-          display: 'flex', 
-          flexDirection: 'column', 
-          backgroundColor: 'white',
-          borderRadius: '16px',
-          overflow: 'hidden',
-          fontFamily: '"Microsoft YaHei", sans-serif',
-          color: '#333',
-          boxSizing: 'border-box',
-          boxShadow: '0 10px 40px rgba(0,0,0,0.25)', // 更加深邃的自定义圆角阴影
-          border: '1px solid rgba(0,0,0,0.08)',
-          pointerEvents: 'auto'
-        }}>
       
       {/* Title Bar / Drag Region */}
       <div data-tauri-drag-region style={{ 
@@ -426,8 +414,6 @@ function Home() {
           >
               <Monitor size={20} color="#666" />
           </div>
-      </div>
-
       </div>
     </div>
   );

@@ -15,11 +15,12 @@
       {
         "label": "main",
         "title": "Syuink VPN",
-        "width": 420,
-        "height": 660,
+        "width": 360,
+        "height": 600,
         "decorations": false,
         "transparent": true,
         "shadow": false,
+        "resizable": false,
         "visible": false
       }
     ],
