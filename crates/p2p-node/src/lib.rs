@@ -384,7 +384,7 @@ impl P2PNode {
                         SignalMessage::Broadcast { source, data } => {
                             if source == my_id { continue; }
                             if let Ok(raw) = BASE64.decode(&data) {
-                                info!("Received Broadcast from {}, writing {} bytes to TUN", source, raw.len());
+                                // info!("Received Broadcast from {}, writing {} bytes to TUN", source, raw.len());
                                 let mut writer = tun_writer.lock().await;
                                 let _ = writer.write_all(&raw).await;
                             }
