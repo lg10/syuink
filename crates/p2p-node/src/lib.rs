@@ -17,7 +17,7 @@ use socks5::{Socks5Server, SocksMsg};
 use anyhow::Result;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tracing::{info, error, warn};
+use tracing::{info, error, warn, debug};
 use uuid::Uuid;
 
 use serde::{Serialize, Deserialize};
@@ -226,9 +226,6 @@ impl P2PNode {
                 .args(&["add", "10.251.0.0", "mask", "255.255.255.0", &allocated_ip, "metric", "1"])
                 .output();
         }
-        
-        // Track background tasks to abort them on shutdown
-
 
         let mut background_tasks = Vec::new();
 
@@ -494,7 +491,6 @@ impl P2PNode {
                 }
 
                 // Read from TUN (Outbound traffic)
-
                 res = tun_reader.read(&mut buf) => {
                     match res {
                         Ok(0) => {
@@ -508,9 +504,6 @@ impl P2PNode {
                         Ok(n) => {
                             let packet_data = &buf[..n];
                             
-                            // Debug: Log raw read
-                            // info!("[TUN] Read {} bytes", n);
-
                             if let Ok(ipv4) = Ipv4HeaderSlice::from_slice(packet_data) {
                                 let dest = ipv4.destination_addr();
                                 let dest_ip = std::net::Ipv4Addr::from(dest);
@@ -548,15 +541,10 @@ impl P2PNode {
                                                     source: my_id.clone(),
                                                     data: b64,
                                                 }).await;
-                                                
-                                                // Trigger P2P (if not already tried/failed recently)
-                                                // The previous logs showed it triggered on PeerJoined, which is good.
                                             }
                                         }
                                         handled = true;
                                     } else {
-                                        // Peer not found in map, but it's VPN traffic
-                                        // This could happen if signaling hasn't synced yet
                                         debug!("[TUN] No peer found for IP {}", dest_ip);
                                     }
                                 }
