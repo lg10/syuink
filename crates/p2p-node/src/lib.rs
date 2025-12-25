@@ -130,16 +130,20 @@ impl P2PNode {
 
         let webrtc_manager = Arc::new(WebRTCManager::new(my_id.clone(), tun_writer.clone(), p2p_event_tx.clone()).await?);
 
+        let mut background_tasks = Vec::new();
 
         // 2. Setup Broadcast Reflector
+
 
         let reflector = BroadcastReflector::new().await?;
         let (broadcast_tx, mut broadcast_rx) = tokio::sync::mpsc::channel::<(Vec<u8>, u16)>(100);
         let reflector_clone = std::sync::Arc::new(reflector);
         let reflector_listener = reflector_clone.clone();
-        tokio::spawn(async move {
+        let reflector_task = tokio::spawn(async move {
             reflector_listener.listen_loop(broadcast_tx).await;
         });
+        background_tasks.push(reflector_task);
+
 
         // 3. Setup Signaling
         // Use provided my_id instead of generating new one
@@ -256,7 +260,9 @@ impl P2PNode {
 
         let mut route_manager = RouteManager::new(allocated_ip.clone());
         
-        let mut background_tasks = Vec::new();
+        // Remove the redundant re-declaration later in the file
+        // let mut background_tasks = Vec::new();
+
 
         
         

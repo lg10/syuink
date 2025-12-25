@@ -44,9 +44,19 @@ impl WebRTCManager {
         let mut registry = webrtc::interceptor::registry::Registry::new();
         registry = register_default_interceptors(registry, &mut m)?;
 
+        let mut s = webrtc::api::setting_engine::SettingEngine::default();
+        s.set_network_types(vec![
+            webrtc::ice::network_type::NetworkType::Udp4,
+            webrtc::ice::network_type::NetworkType::Udp6,
+        ]);
+        // Disable mDNS to avoid long timeouts and warnings if not needed
+        s.set_ice_multicast_dns_mode(webrtc::ice::mdns::MulticastDnsMode::Disabled);
+
+
         let api = APIBuilder::new()
             .with_media_engine(m)
             .with_interceptor_registry(registry)
+            .with_setting_engine(s)
             .build();
 
         Ok(Self {
