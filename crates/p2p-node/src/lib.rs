@@ -200,44 +200,58 @@ impl P2PNode {
             let _ = tx.send((allocated_ip.clone(), socks5_port)).await;
         }
 
+        // On Windows, explicitly configure the Wintun interface BEFORE entering the main loop
+        #[cfg(target_os = "windows")]
+        {
+            info!("Pre-configuring Wintun interface 'Syuink' with IP {}...", allocated_ip);
+            
+            // Ensure interface is enabled
+            let _ = std::process::Command::new("powershell")
+                .args(&["-Command", "Enable-NetAdapter -Name Syuink -Confirm:$false -ErrorAction SilentlyContinue"])
+                .output();
+
+            // Set IP address and mask
+            let _ = std::process::Command::new("netsh")
+                .args(&["interface", "ip", "set", "address", "name=Syuink", "static", &allocated_ip, "255.255.255.0", "none"])
+                .output();
+                
+            // Set interface metric
+            let _ = std::process::Command::new("netsh")
+                .args(&["interface", "ip", "set", "interface", "Syuink", "metric=1"])
+                .output();
+
+            // Add the route
+            let _ = std::process::Command::new("route")
+                .args(&["add", "10.251.0.0", "mask", "255.255.255.0", &allocated_ip, "metric", "1"])
+                .output();
+
+            // Set network category to Private
+            let _ = std::process::Command::new("powershell")
+                .args(&["-Command", "Get-NetConnectionProfile -InterfaceAlias Syuink -ErrorAction SilentlyContinue | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue"])
+                .output();
+                
+            // Give Windows a moment to stabilize the interface
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+
+        // On macOS, ensure the utun interface has the correct routing
+        #[cfg(target_os = "macos")]
+        {
+            info!("Configuring macOS routing for 10.251.0.0/24 via {}...", allocated_ip);
+            // We use 'route add' to ensure the subnet is routed through the VPN
+            let _ = std::process::Command::new("sudo")
+                .args(&["route", "-n", "add", "-net", "10.251.0.0/24", &allocated_ip])
+                .output();
+        }
+
         // 5. Main Event Loop
         let mut buf = [0u8; 4096];
         let mut peers: HashMap<String, PeerInfo> = HashMap::new();
 
         let mut route_manager = RouteManager::new(allocated_ip.clone());
         
-        // On Windows, explicitly configure the Wintun interface using netsh for maximum reliability
-        #[cfg(target_os = "windows")]
-        {
-            info!("Configuring Wintun interface 'Syuink' with IP {}...", allocated_ip);
-            
-            // 0. Ensure interface is enabled
-            let _ = std::process::Command::new("powershell")
-                .args(&["-Command", "Enable-NetAdapter -Name Syuink -Confirm:$false -ErrorAction SilentlyContinue"])
-                .output();
-
-            // 1. Set IP address and mask (this also adds the subnet route)
-            let _ = std::process::Command::new("netsh")
-                .args(&["interface", "ip", "set", "address", "name=Syuink", "static", &allocated_ip, "255.255.255.0", "none"])
-                .output();
-                
-            // 2. Set interface metric to 1 to ensure it's preferred over other adapters for its subnet
-            let _ = std::process::Command::new("netsh")
-                .args(&["interface", "ip", "set", "interface", "Syuink", "metric=1"])
-                .output();
-
-            // 3. Force add the specific route just in case
-            let _ = std::process::Command::new("route")
-                .args(&["add", "10.251.0.0", "mask", "255.255.255.0", &allocated_ip, "metric", "1"])
-                .output();
-
-            // 4. Set network category to Private to bypass default firewall rules
-            let _ = std::process::Command::new("powershell")
-                .args(&["-Command", "Get-NetConnectionProfile -InterfaceAlias Syuink -ErrorAction SilentlyContinue | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue"])
-                .output();
-        }
-
         let mut background_tasks = Vec::new();
+
 
         
         if let Some(client) = &signal_client {
@@ -517,13 +531,13 @@ impl P2PNode {
                             let packet_data = &buf[..n];
                             
                             if let Ok(ipv4) = Ipv4HeaderSlice::from_slice(packet_data) {
-                                let dest = ipv4.destination_addr();
-                                let dest_ip = std::net::Ipv4Addr::from(dest);
+                                let dest_ip = std::net::Ipv4Addr::from(ipv4.destination_addr());
+                                let src_ip = std::net::Ipv4Addr::from(ipv4.source_addr());
                                 
                                 let is_vpn_traffic = dest_ip.octets()[0] == 10 && dest_ip.octets()[1] == 251;
                                 
                                 if is_vpn_traffic {
-                                    debug!("[TUN] Outbound packet: {} -> {}", ipv4.source_addr(), dest_ip);
+                                    info!("[TUN] Outbound: {} -> {} ({} bytes)", src_ip, dest_ip, n);
                                 }
                                 
                                 let is_broadcast = dest_ip.is_broadcast() || dest_ip.is_multicast() || dest_ip.octets()[3] == 255;
@@ -534,6 +548,7 @@ impl P2PNode {
                                     let target_peer = peers.values().find(|p| p.ip == dest_ip.to_string());
                                     
                                     if let Some(peer) = target_peer {
+                                        info!("[Route] Forwarding to peer: {}", peer.name);
                                         let mut sent_p2p = false;
                                         
                                         // Try P2P first

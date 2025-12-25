@@ -114,15 +114,22 @@ async fn start_vpn(
         
         #[cfg(target_os = "windows")]
         {
-            // ... (cleanup code) ...
              use std::process::Command;
-             println!("Cleaning up old Syuink adapters...");
+             println!("Cleaning up old Syuink adapters and routes...");
+             
+             // 1. Remove routes first
+             let _ = Command::new("route").args(&["delete", "10.251.0.0"]).output();
+             
+             // 2. More aggressive device removal
              let _ = Command::new("powershell")
                  .args(&[
                      "-Command",
-                     "Get-PnpDevice | Where-Object { $_.FriendlyName -like 'Syuink*' } | ForEach-Object { Write-Host 'Removing ' $_.FriendlyName; pnputil /remove-device $_.InstanceId /force }",
+                     "Get-NetAdapter | Where-Object { $_.InterfaceDescription -like '*Wintun*' -or $_.Name -like '*Syuink*' } | Disable-NetAdapter -Confirm:$false; Get-PnpDevice | Where-Object { $_.FriendlyName -like 'Syuink*' -or $_.FriendlyName -like 'Wintun*' } | ForEach-Object { pnputil /remove-device $_.InstanceId /force }",
                  ])
                  .output();
+                 
+             // 3. Small delay to let OS update device list
+             std::thread::sleep(std::time::Duration::from_millis(800));
         }
 
         let node = P2PNode::new(ip_addr, mask, name);
