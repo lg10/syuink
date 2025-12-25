@@ -23,9 +23,15 @@ impl TunDevice {
         #[cfg(not(target_os = "macos"))]
         config.name("Syuink");
 
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        #[cfg(target_os = "linux")]
         config.platform(|config| {
             config.packet_information(false); // Pure IP packets
+        });
+
+        #[cfg(target_os = "macos")]
+        config.platform(|config| {
+            // On macOS, the packet_information is handled via a different mechanism in the tun crate,
+            // or is not accessible via this closure.
         });
 
         #[cfg(target_os = "windows")]
