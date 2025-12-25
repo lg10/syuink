@@ -273,19 +273,28 @@ impl P2PNode {
                             
                             // Try P2P connection if public address and port are available
                             if let (Some(ref pa), port) = (&public_addr, p2p_port) {
-                                if port > 0 {
+                                if port > 0 && pa != "unknown" {
                                     if let Ok(ip_addr) = pa.parse::<IpAddr>() {
                                         let addr = SocketAddr::new(ip_addr, port);
+                                        info!("Attempting P2P connection to {} at {}", name, addr);
                                         let pm = p2p_manager.clone();
                                         let pid = id.clone();
+                                        let pname = name.clone();
                                         tokio::spawn(async move {
                                             if let Err(e) = pm.connect_to(pid.clone(), addr).await {
-                                                warn!("P2P connection failed to {}: {}", pid, e);
+                                                warn!("P2P connection failed to {} ({}): {}", pname, pid, e);
                                             }
                                         });
+                                    } else {
+                                        warn!("Failed to parse public address: {}", pa);
                                     }
+                                } else {
+                                    info!("P2P not available for {}: public_addr={:?}, port={}", name, pa, port);
                                 }
                             }
+
+
+                            let existing_status = peers.get(&id).map(|p| p.route_status.clone()).unwrap_or_else(|| "relay".to_string());
 
                             if let Some(ref tx) = peer_update_tx {
                                 let mut list: Vec<PeerInfo> = peers.values().cloned().collect();
@@ -302,9 +311,8 @@ impl P2PNode {
                                          device_type: device_type.clone(), 
                                          is_gateway, 
                                          connected_at,
-                                         route_status: "relay".to_string(),
+                                         route_status: existing_status.clone(),
                                      });
-
                                 }
                                 let _ = tx.send(list).await;
                             }
@@ -320,8 +328,9 @@ impl P2PNode {
                                 device_type,
                                 is_gateway,
                                 connected_at,
-                                route_status: "relay".to_string(),
+                                route_status: existing_status,
                             });
+
 
 
                         }
@@ -541,20 +550,19 @@ impl P2PNode {
                                                 }).await;
                                                 
                                                 // Trigger P2P connection attempt if we have a public address
-                                                if let Some(public_addr) = &peer.public_addr {
-                                                    if let Ok(addr) = public_addr.parse::<std::net::SocketAddr>() {
-                                                        let pm = p2p_manager.clone();
-                                                        let pid = peer.id.clone();
-                                                        tokio::spawn(async move {
-                                                            let _ = pm.connect_to(pid, addr).await;
-                                                        });
-                                                    } else if let Ok(ip) = public_addr.parse::<std::net::IpAddr>() {
-                                                        // If it's just an IP, we might need a fixed port or have the port sent too
-                                                        // For now, let's assume the public_addr from DO might be just IP
-                                                        // Actually DO gives us the IP. We need the port.
-                                                        // Let's modify index.ts to include the port if available.
+                                                if let (Some(ref pa), port) = (&peer.public_addr, peer.p2p_port) {
+                                                    if port > 0 && pa != "unknown" {
+                                                        if let Ok(ip_addr) = pa.parse::<IpAddr>() {
+                                                            let addr = SocketAddr::new(ip_addr, port);
+                                                            let pm = p2p_manager.clone();
+                                                            let pid = peer.id.clone();
+                                                            tokio::spawn(async move {
+                                                                let _ = pm.connect_to(pid, addr).await;
+                                                            });
+                                                        }
                                                     }
                                                 }
+
                                             }
                                         }
                                         handled = true;

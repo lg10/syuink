@@ -65,16 +65,30 @@ impl P2PManager {
         info!("Attempting P2P connection to {} at {}", peer_id, addr);
         
         let client_cfg = make_client_config();
-        let conn = self.endpoint.connect_with(client_cfg, addr, "syuink-p2p")?
-            .await
-            .context("Failed to connect to peer via QUIC")?;
+        let conn_res = self.endpoint.connect_with(client_cfg, addr, "syuink-p2p");
+        
+        let conn = match conn_res {
+            Ok(connecting) => {
+                match connecting.await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!("QUIC connection attempt failed to {}: {}", peer_id, e);
+                        return Err(anyhow::anyhow!("QUIC connection failed: {}", e));
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to initiate QUIC connection to {}: {}", peer_id, e);
+                return Err(anyhow::anyhow!("QUIC initiation failed: {}", e));
+            }
+        };
             
         // Handshake: Send our ID
         let mut send = conn.open_uni().await?;
         send.write_all(self.my_id.as_bytes()).await?;
         send.finish().await?;
 
-        info!("P2P connected to {}", peer_id);
+        info!("P2P handshake sent to {}", peer_id);
         {
             let mut conns = self.connections.lock().await;
             conns.insert(peer_id.clone(), conn.clone());
@@ -96,6 +110,7 @@ impl P2PManager {
 
         Ok(())
     }
+
 
 
     pub async fn get_connection(&self, peer_id: &str) -> Option<Connection> {
@@ -210,8 +225,16 @@ fn make_server_endpoint(bind_addr: SocketAddr) -> Result<(Endpoint, Vec<u8>)> {
     let cert = rustls::Certificate(cert_der.clone());
     let key = rustls::PrivateKey(key_der);
     
-    let mut server_config = quinn::ServerConfig::with_single_cert(vec![cert], key)?;
+    let mut crypto = rustls::ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)?;
+    crypto.alpn_protocols = vec![b"syuink-p2p".to_vec()];
+    
+    let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(crypto));
     let mut transport_config = quinn::TransportConfig::default();
+
+
     transport_config.keep_alive_interval(Some(std::time::Duration::from_secs(5)));
     // Enable datagrams
     transport_config.datagram_receive_buffer_size(Some(1024 * 1024));
