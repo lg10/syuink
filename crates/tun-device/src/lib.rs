@@ -23,9 +23,14 @@ impl TunDevice {
         #[cfg(not(target_os = "macos"))]
         config.name("Syuink");
 
-        // We want pure IP packets (no PI header) on all platforms for consistency
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         config.platform(|config| {
-            config.packet_information(false);
+            config.packet_information(false); // Pure IP packets
+        });
+
+        #[cfg(target_os = "windows")]
+        config.platform(|_config| {
+            // Windows Wintun settings
         });
 
         let dev = tun::create_as_async(&config).context("Failed to create TUN device")?;
