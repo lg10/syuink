@@ -417,6 +417,7 @@ var SignalRoom = class {
       }
       const targetId = msg.target_id || msg.target;
       if (targetId) {
+        console.log(`[FORWARD] Relaying message type '${msg.type}' from ${this.sessions.get(sender)?.id || "unknown"} to ${targetId}`);
         let found = false;
         for (const [ws, meta] of this.sessions) {
           if (meta.id === targetId) {
@@ -429,6 +430,7 @@ var SignalRoom = class {
           console.warn(`[FORWARD] Target ${targetId} not found for message type: ${msg.type}`);
         }
       } else {
+        console.log(`[BROADCAST] Broadcasting message type '${msg.type}' from ${this.sessions.get(sender)?.id || "unknown"}`);
         this.broadcast(msg, sender);
       }
     } catch (e) {

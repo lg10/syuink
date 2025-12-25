@@ -4,12 +4,15 @@ pub mod gateway;
 pub mod route_manager;
 pub mod socks5;
 pub mod p2p;
+pub mod webrtc;
 
 
 use std::net::{Ipv4Addr, SocketAddr, IpAddr};
 
 use tun_device::TunDevice;
 use broadcast::BroadcastReflector;
+use p2p::P2PEvent;
+use webrtc::WebRTCManager;
 use signaling::{SignalingClient, SignalMessage, ServiceDecl};
 use gateway::GatewayRouter;
 use route_manager::RouteManager;
@@ -26,6 +29,7 @@ use std::sync::Arc;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use etherparse::{Ipv4HeaderSlice, PacketBuilder};
+use bytes::Bytes;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PeerInfo {
@@ -121,14 +125,16 @@ impl P2PNode {
         
         // 6. Setup P2P Manager
         let (p2p_event_tx, mut p2p_event_rx) = tokio::sync::mpsc::channel(32);
-        let p2p_manager = Arc::new(p2p::P2PManager::new(0, tun_writer.clone(), p2p_event_tx, my_id.clone())?); // Listen on random UDP port
+        let p2p_manager = Arc::new(p2p::P2PManager::new(0, tun_writer.clone(), p2p_event_tx.clone(), my_id.clone())?); // Listen on random UDP port
         let p2p_port = p2p_manager.local_port();
+
+        let webrtc_manager = Arc::new(WebRTCManager::new(my_id.clone(), tun_writer.clone(), p2p_event_tx.clone()).await?);
 
 
         // 2. Setup Broadcast Reflector
 
         let reflector = BroadcastReflector::new().await?;
-        let (broadcast_tx, mut broadcast_rx) = tokio::sync::mpsc::channel(100);
+        let (broadcast_tx, mut broadcast_rx) = tokio::sync::mpsc::channel::<(Vec<u8>, u16)>(100);
         let reflector_clone = std::sync::Arc::new(reflector);
         let reflector_listener = reflector_clone.clone();
         tokio::spawn(async move {
@@ -161,7 +167,7 @@ impl P2PNode {
                         services: my_services,
                     }).await;
                 }
-                Some(client)
+                Some(Arc::new(client))
             },
             Err(e) => {
                 error!("Failed to connect to signaling server: {}", e);
@@ -252,11 +258,11 @@ impl P2PNode {
         
         let mut background_tasks = Vec::new();
 
-
+        
         
         if let Some(client) = &signal_client {
              let s = socks5_server.clone();
-             let c = Arc::new(client.clone());
+             let c = client.clone();
              let m = my_id.clone();
              let r = shared_routes.clone();
              let task = tokio::spawn(async move {
@@ -313,23 +319,37 @@ impl P2PNode {
                         SignalMessage::PeerJoined { id, ip, public_addr, p2p_port, name, os, version, device_type, is_gateway, connected_at } => {
                             info!("New Peer Joined: {} ({}) - {} [Public: {:?}:{}]", name, ip, id, public_addr, p2p_port);
                             
-                            // Try P2P connection if public address and port are available
+                            // Try P2P (QUIC) connection if public address and port are available
                             if let (Some(ref pa), port) = (&public_addr, p2p_port) {
                                 if port > 0 && pa != "unknown" {
                                     if let Ok(ip_addr) = pa.parse::<IpAddr>() {
                                         let addr = SocketAddr::new(ip_addr, port);
-                                        info!("Attempting P2P connection to {} at {}", name, addr);
+                                        info!("Attempting P2P (QUIC) connection to {} at {}", name, addr);
                                         let pm = p2p_manager.clone();
                                         let pid = id.clone();
                                         let pname = name.clone();
                                         tokio::spawn(async move {
                                             if let Err(e) = pm.connect_to(pid.clone(), addr).await {
-                                                warn!("P2P connection failed to {} ({}): {}", pname, pid, e);
+                                                warn!("P2P (QUIC) connection failed to {} ({}): {}", pname, pid, e);
                                             }
                                         });
                                     }
                                 }
                             }
+
+                            // Also try WebRTC connection in parallel
+                            if let Some(sc) = &signal_client {
+                                info!("Attempting P2P (WebRTC) connection to {}", name);
+                                let wm = webrtc_manager.clone();
+                                let sc = sc.clone();
+                                let pid = id.clone();
+                                tokio::spawn(async move {
+                                    if let Err(e) = wm.connect_to(pid.clone(), sc).await {
+                                        warn!("[WebRTC] Connection initiation failed for peer {}: {}", pid, e);
+                                    }
+                                });
+                            }
+
 
                             // CRITICAL: Don't overwrite route_status if we already have a P2P connection
                             let existing_status = peers.get(&id).map(|p| p.route_status.clone()).unwrap_or_else(|| "relay".to_string());
@@ -496,8 +516,37 @@ impl P2PNode {
                              socks5_server.on_msg(stream_id, SocksMsg::Closed).await;
                              incoming_tcp.remove(&(source_peer, stream_id));
                         }
-                        SignalMessage::Offer { .. } => {
-                            info!("Received Offer (P2P negotiation)");
+                        SignalMessage::Offer { source, sdp, .. } => {
+                            info!("Received WebRTC Offer from {}", source);
+                            if let Some(sc) = &signal_client {
+                                let wm = webrtc_manager.clone();
+                                let sc = sc.clone();
+                                tokio::spawn(async move {
+                                    if let Err(e) = wm.handle_offer(source, sdp, sc).await {
+                                        warn!("[WebRTC] Error handling offer: {}", e);
+                                    }
+                                });
+                            }
+                        }
+                        SignalMessage::Answer { source, sdp, .. } => {
+                             if let Some(_sc) = &signal_client {
+                                let wm = webrtc_manager.clone();
+                                tokio::spawn(async move {
+                                    if let Err(e) = wm.handle_answer(source, sdp).await {
+                                        warn!("[WebRTC] Error handling answer: {}", e);
+                                    }
+                                });
+                            }
+                        }
+                        SignalMessage::Candidate { source, candidate, .. } => {
+                             if let Some(_sc) = &signal_client {
+                                let wm = webrtc_manager.clone();
+                                tokio::spawn(async move {
+                                    if let Err(e) = wm.handle_candidate(source, candidate).await {
+                                        warn!("[WebRTC] Error handling candidate: {}", e);
+                                    }
+                                });
+                            }
                         }
                         _ => {}
                     }
@@ -506,10 +555,14 @@ impl P2PNode {
                 // Handle P2P Events
                 Some(event) = p2p_event_rx.recv() => {
                     match event {
-                        p2p::P2PEvent::Connected(id) => {
+                        P2PEvent::Connected(id, transport) => {
                             if let Some(peer) = peers.get_mut(&id) {
-                                info!("Peer {} switched to P2P connection", peer.name);
-                                peer.route_status = "p2p".to_string();
+                                let status = match transport {
+                                    p2p::P2PTransport::Udp => "p2p",
+                                    p2p::P2PTransport::WebRTC => "webrtc",
+                                };
+                                info!("Peer {} switched to {} connection", peer.name, status);
+                                peer.route_status = status.to_string();
                                 
                                 if let Some(ref tx) = peer_update_tx {
                                     let list: Vec<PeerInfo> = peers.values().cloned().collect();
@@ -517,7 +570,7 @@ impl P2PNode {
                                 }
                             }
                         }
-                        p2p::P2PEvent::Disconnected(id) => {
+                        P2PEvent::Disconnected(id) => {
                             if let Some(peer) = peers.get_mut(&id) {
                                 info!("Peer {} lost P2P connection, falling back to relay", peer.name);
                                 peer.route_status = "relay".to_string();

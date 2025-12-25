@@ -480,6 +480,7 @@ export class SignalRoom {
             const targetId = msg.target_id || msg.target; // Support both fields
 			if (targetId) {
 				// Find target socket
+                console.log(`[FORWARD] Relaying message type '${msg.type}' from ${this.sessions.get(sender)?.id || 'unknown'} to ${targetId}`);
                 let found = false;
 				for (const [ws, meta] of this.sessions) {
 					if (meta.id === targetId) {
@@ -493,6 +494,7 @@ export class SignalRoom {
                 }
 			} else {
 				// Broadcast
+				console.log(`[BROADCAST] Broadcasting message type '${msg.type}' from ${this.sessions.get(sender)?.id || 'unknown'}`);
 				this.broadcast(msg, sender);
 			}
 		} catch (e) {

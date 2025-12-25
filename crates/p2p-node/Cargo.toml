@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 shared-proto = { path = "../shared-proto" }
 tun-device = { path = "../tun-device" }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 quinn = { workspace = true }
@@ -16,6 +16,9 @@ futures = { workspace = true }
 socket2.workspace = true
 uuid = { workspace = true }
 rustls = { version = "0.21", features = ["quic", "dangerous_configuration"] }
+webrtc = "0.8"
+rand = "0.8"
+reqwest = { version = "0.11", features = ["blocking", "rustls-tls-native-roots"] }
 
 tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
 url = "2.5"

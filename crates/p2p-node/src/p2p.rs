@@ -6,10 +6,15 @@ use tokio::sync::Mutex;
 use std::collections::HashMap;
 use tokio::io::AsyncWriteExt;
 
+#[derive(Debug, Clone)]
+pub enum P2PTransport {
+    Udp,
+    WebRTC,
+}
 
 #[derive(Debug, Clone)]
 pub enum P2PEvent {
-    Connected(String),
+    Connected(String, P2PTransport),
     Disconnected(String),
 }
 
@@ -38,7 +43,7 @@ impl P2PManager {
             Self::accept_loop(endpoint_clone, connections_clone, tw, etx).await;
         });
 
-        info!("QUIC P2P listening on {}", endpoint.local_addr()?);
+        info!("[P2P] QUIC listening on {}", endpoint.local_addr()?);
 
         Ok(Self {
             endpoint,
@@ -96,13 +101,13 @@ impl P2PManager {
         send.write_all(self.my_id.as_bytes()).await?;
         send.finish().await?;
 
-        info!("P2P handshake sent to {}", peer_id);
+        info!("[P2P] Handshake sent to {}", peer_id);
         {
             let mut conns = self.connections.lock().await;
             conns.insert(peer_id.clone(), conn.clone());
         }
         
-        let _ = self.event_tx.send(P2PEvent::Connected(peer_id.clone())).await;
+        let _ = self.event_tx.send(P2PEvent::Connected(peer_id.clone(), P2PTransport::Udp)).await;
         
         // Monitor disconnection
         let etx = self.event_tx.clone();
@@ -110,7 +115,7 @@ impl P2PManager {
         let connections = self.connections.clone();
         tokio::spawn(async move {
             let _ = conn.closed().await;
-            info!("P2P connection to {} closed", pid);
+            info!("[P2P] Connection to {} closed", pid);
             let mut conns = connections.lock().await;
             conns.remove(&pid);
             let _ = etx.send(P2PEvent::Disconnected(pid)).await;
@@ -161,12 +166,12 @@ impl P2PManager {
                             }
                         };
 
-                        info!("P2P handshake successful from peer: {}", peer_id);
+                        info!("[P2P] Handshake successful from peer: {}", peer_id);
                         {
                             let mut conns = connections.lock().await;
                             conns.insert(peer_id.clone(), connection.clone());
                         }
-                        let _ = event_tx.send(P2PEvent::Connected(peer_id.clone())).await;
+                        let _ = event_tx.send(P2PEvent::Connected(peer_id.clone(), P2PTransport::Udp)).await;
 
                         // Monitor disconnection
                         let etx = event_tx.clone();
@@ -175,7 +180,7 @@ impl P2PManager {
                         let conn_clone = connection.clone();
                         tokio::spawn(async move {
                             let _ = conn_clone.closed().await;
-                            info!("P2P connection from {} closed", pid);
+                            info!("[P2P] Connection from {} closed", pid);
                             let mut conns = conns_clone.lock().await;
                             conns.remove(&pid);
                             let _ = etx.send(P2PEvent::Disconnected(pid)).await;
@@ -220,6 +225,7 @@ impl P2PManager {
         }
     }
 }
+
 
 
 
