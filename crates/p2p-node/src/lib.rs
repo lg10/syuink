@@ -393,8 +393,23 @@ impl P2PNode {
                              if let Ok(raw) = BASE64.decode(&data) {
                                  info!("[Relay] Received TunPacket ({} bytes) from {}", raw.len(), source);
                                  let mut writer = tun_writer.lock().await;
-                                 if let Err(e) = writer.write_all(&raw).await {
-                                     error!("[Relay] Failed to write TunPacket to TUN: {}", e);
+                                 
+                                 #[cfg(target_os = "macos")]
+                                 {
+                                     // macOS utun requires a 4-byte PI header: [0, 0, 0, 2] for IPv4
+                                     let mut pi_packet = Vec::with_capacity(raw.len() + 4);
+                                     pi_packet.extend_from_slice(&[0, 0, 0, 2]);
+                                     pi_packet.extend_from_slice(&raw);
+                                     if let Err(e) = writer.write_all(&pi_packet).await {
+                                         error!("[Relay] Failed to write TunPacket to macOS TUN: {}", e);
+                                     }
+                                 }
+                                 
+                                 #[cfg(not(target_os = "macos"))]
+                                 {
+                                     if let Err(e) = writer.write_all(&raw).await {
+                                         error!("[Relay] Failed to write TunPacket to TUN: {}", e);
+                                     }
                                  }
                              } else {
                                  error!("[Relay] Failed to decode TunPacket data from {}", source);
@@ -528,6 +543,10 @@ impl P2PNode {
                             break Ok((allocated_ip, socks5_port));
                         }
                         Ok(n) => {
+                            #[cfg(target_os = "macos")]
+                            let packet_data = if n >= 4 { &buf[4..n] } else { &buf[..n] };
+                            
+                            #[cfg(not(target_os = "macos"))]
                             let packet_data = &buf[..n];
                             
                             if let Ok(ipv4) = Ipv4HeaderSlice::from_slice(packet_data) {
