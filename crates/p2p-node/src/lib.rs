@@ -365,14 +365,16 @@ impl P2PNode {
                             if let Ok(raw) = BASE64.decode(&data) {
                                 info!("Received Broadcast from {}, writing {} bytes to TUN", source, raw.len());
                                 let mut writer = tun_writer.lock().await;
-                                let _ = writer.write(&raw).await;
+                                let _ = writer.write_all(&raw).await;
                             }
                         }
                         SignalMessage::TunPacket { source, data, .. } => {
                              if let Ok(raw) = BASE64.decode(&data) {
-                                 info!("Received TunPacket from {}, writing {} bytes to TUN", source, raw.len());
+                                 info!("[Relay] Received TunPacket ({} bytes) from {}", raw.len(), source);
                                  let mut writer = tun_writer.lock().await;
-                                 let _ = writer.write(&raw).await;
+                                 if let Err(e) = writer.write_all(&raw).await {
+                                     error!("[Relay] Failed to write TunPacket to TUN: {}", e);
+                                 }
                              }
                         }
                         SignalMessage::TcpConnect { stream_id, source: source_peer, target_ip, target_port, .. } => {
@@ -510,8 +512,12 @@ impl P2PNode {
                                 let dest_ip = std::net::Ipv4Addr::from(dest);
                                 
                                 let is_vpn_traffic = dest_ip.octets()[0] == 10 && dest_ip.octets()[1] == 10;
-                                let is_broadcast = dest_ip.is_broadcast() || dest_ip.is_multicast();
                                 
+                                if is_vpn_traffic {
+                                    info!("[TUN] Outbound packet: {} -> {}", ipv4.source_addr(), dest_ip);
+                                }
+                                
+                                let is_broadcast = dest_ip.is_broadcast() || dest_ip.is_multicast();
                                 let mut handled = false;
 
                                 // 1. Try Unicast routing for VPN internal traffic (10.10.x.x)
@@ -524,6 +530,7 @@ impl P2PNode {
                                         if let Some(conn) = p2p_manager.get_connection(&peer.id).await {
                                             // 1. Try Datagram (fast path)
                                             if let Ok(_) = conn.send_datagram(packet_data.to_vec().into()) {
+                                                info!("[P2P] Sent Datagram to {} ({})", peer.name, peer.ip);
                                                 sent_p2p = true;
                                             } else {
                                                 // 2. Fallback to Stream (for large packets or if datagrams are disabled)
@@ -531,17 +538,18 @@ impl P2PNode {
                                                     Ok(mut send) => {
                                                         if let Ok(_) = send.write_all(packet_data).await {
                                                             let _ = send.finish().await;
+                                                            info!("[P2P] Sent Stream packet to {} ({})", peer.name, peer.ip);
                                                             sent_p2p = true;
                                                         }
                                                     }
-                                                    Err(e) => warn!("Failed to open P2P stream to {}: {}", peer.id, e),
+                                                    Err(e) => warn!("[P2P] Failed to open stream to {}: {}", peer.id, e),
                                                 }
                                             }
                                         }
 
                                         if !sent_p2p {
                                             if let Some(client) = &signal_client {
-                                                info!("Sending Unicast TunPacket to {} ({}) via Relay (P2P not connected)", peer.name, peer.ip);
+                                                info!("[Relay] Sending TunPacket to {} ({}) via Relay", peer.name, peer.ip);
                                                 let b64 = BASE64.encode(packet_data);
                                                 let _ = client.send(SignalMessage::TunPacket {
                                                     target: peer.id.clone(),
@@ -556,12 +564,12 @@ impl P2PNode {
                                                             let addr = SocketAddr::new(ip_addr, port);
                                                             let pm = p2p_manager.clone();
                                                             let pid = peer.id.clone();
+                                                            let pname = peer.name.clone();
                                                             tokio::spawn(async move {
+                                                                info!("[P2P] Triggering connection to {} at {}", pname, addr);
                                                                 let _ = pm.connect_to(pid, addr).await;
                                                             });
                                                         }
-                                                    } else {
-                                                        warn!("P2P skipped for {}: Invalid public IP {:?}", peer.name, pa);
                                                     }
                                                 }
                                             }

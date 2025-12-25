@@ -279,14 +279,27 @@ export class SignalRoom {
 		const webSocketPair = new WebSocketPair();
 		const [client, server] = Object.values(webSocketPair);
 
-        const publicAddr = request.headers.get('CF-Connecting-IP') || 
-                           request.headers.get('X-Forwarded-For')?.split(',')[0].trim() || 
-                           'unknown';
+        const xForwardedFor = request.headers.get('X-Forwarded-For')?.split(',')[0].trim();
+        const xRealIp = request.headers.get('X-Real-IP');
+        const cfIp = request.headers.get('CF-Connecting-IP');
+
+        let publicAddr = 'unknown';
+
+        // 优先级逻辑：优先信任 Nginx 转发的真实 IP
+        // 如果 X-Forwarded-For 存在且不是内网 IP，优先使用它
+        if (xForwardedFor && !xForwardedFor.startsWith('172.') && !xForwardedFor.startsWith('10.') && !xForwardedFor.startsWith('192.168.')) {
+            publicAddr = xForwardedFor;
+        } else if (xRealIp && !xRealIp.startsWith('172.') && !xRealIp.startsWith('10.') && !xRealIp.startsWith('192.168.')) {
+            publicAddr = xRealIp;
+        } else {
+            // 如果前面的都不行，再尝试 CF 或原始字段
+            publicAddr = xForwardedFor || xRealIp || cfIp || 'unknown';
+        }
 
 		server.accept();
 
 		this.sessions.set(server, { public_addr: publicAddr }); // Store public addr initially
-		console.log(`New WebSocket connection from ${publicAddr}. Total sessions:`, this.sessions.size);
+		console.log(`New WebSocket connection from ${publicAddr}. (Raw CF: ${cfIp}, XFF: ${xForwardedFor}). Total sessions:`, this.sessions.size);
 
 		server.addEventListener('message', (event) => {
 			this.handleMessage(server, event.data);

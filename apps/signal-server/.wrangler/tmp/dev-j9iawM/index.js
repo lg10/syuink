@@ -252,10 +252,20 @@ var SignalRoom = class {
     }
     const webSocketPair = new WebSocketPair();
     const [client, server] = Object.values(webSocketPair);
-    const publicAddr = request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For")?.split(",")[0].trim() || "unknown";
+    const xForwardedFor = request.headers.get("X-Forwarded-For")?.split(",")[0].trim();
+    const xRealIp = request.headers.get("X-Real-IP");
+    const cfIp = request.headers.get("CF-Connecting-IP");
+    let publicAddr = "unknown";
+    if (xForwardedFor && !xForwardedFor.startsWith("172.") && !xForwardedFor.startsWith("10.") && !xForwardedFor.startsWith("192.168.")) {
+      publicAddr = xForwardedFor;
+    } else if (xRealIp && !xRealIp.startsWith("172.") && !xRealIp.startsWith("10.") && !xRealIp.startsWith("192.168.")) {
+      publicAddr = xRealIp;
+    } else {
+      publicAddr = xForwardedFor || xRealIp || cfIp || "unknown";
+    }
     server.accept();
     this.sessions.set(server, { public_addr: publicAddr });
-    console.log(`New WebSocket connection from ${publicAddr}. Total sessions:`, this.sessions.size);
+    console.log(`New WebSocket connection from ${publicAddr}. (Raw CF: ${cfIp}, XFF: ${xForwardedFor}). Total sessions:`, this.sessions.size);
     server.addEventListener("message", (event) => {
       this.handleMessage(server, event.data);
     });
