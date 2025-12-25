@@ -1,10 +1,13 @@
 pub mod broadcast;
-   pub mod signaling;
+pub mod signaling;
 pub mod gateway;
 pub mod route_manager;
 pub mod socks5;
+pub mod p2p;
 
-use std::net::Ipv4Addr;
+
+use std::net::{Ipv4Addr, SocketAddr, IpAddr};
+
 use tun_device::TunDevice;
 use broadcast::BroadcastReflector;
 use signaling::{SignalingClient, SignalMessage, ServiceDecl};
@@ -28,12 +31,15 @@ use etherparse::{Ipv4HeaderSlice, PacketBuilder};
 pub struct PeerInfo {
     pub id: String,
     pub ip: String,
+    pub public_addr: Option<String>,
+    pub p2p_port: u16,
     pub name: String,
     pub os: Option<String>,
     pub version: Option<String>,
     pub device_type: Option<String>,
     pub is_gateway: bool,
     pub connected_at: Option<u64>,
+    pub route_status: String,
 }
 
 pub enum NodeCommand {
@@ -113,7 +119,14 @@ impl P2PNode {
             None
         };
         
+        // 6. Setup P2P Manager
+        let (p2p_event_tx, mut p2p_event_rx) = tokio::sync::mpsc::channel(32);
+        let p2p_manager = Arc::new(p2p::P2PManager::new(0, tun_writer.clone(), p2p_event_tx, my_id.clone())?); // Listen on random UDP port
+        let p2p_port = p2p_manager.local_port();
+
+
         // 2. Setup Broadcast Reflector
+
         let reflector = BroadcastReflector::new().await?;
         let (broadcast_tx, mut broadcast_rx) = tokio::sync::mpsc::channel(100);
         let reflector_clone = std::sync::Arc::new(reflector);
@@ -136,6 +149,7 @@ impl P2PNode {
             my_id.clone(),
             allocated_ip.clone(),
             self.device_name.clone(),
+            p2p_port,
             my_meta,
             signal_tx,
         ).await {
@@ -189,10 +203,14 @@ impl P2PNode {
         // 5. Main Event Loop
         let mut buf = [0u8; 4096];
         let mut peers: HashMap<String, PeerInfo> = HashMap::new();
+
         let mut route_manager = RouteManager::new(allocated_ip.clone());
         
         // Track background tasks to abort them on shutdown
+
+
         let mut background_tasks = Vec::new();
+
         
         if let Some(client) = &signal_client {
              let s = socks5_server.clone();
@@ -250,23 +268,62 @@ impl P2PNode {
                 // Handle Signaling Messages
                 Some(msg) = signal_rx.recv() => {
                     match msg {
-                        SignalMessage::PeerJoined { id, ip, name, os, version, device_type, is_gateway, connected_at } => {
-                            info!("New Peer Joined: {} ({}) - {}", name, ip, id);
+                        SignalMessage::PeerJoined { id, ip, public_addr, p2p_port, name, os, version, device_type, is_gateway, connected_at } => {
+                            info!("New Peer Joined: {} ({}) - {} [Public: {:?}:{}]", name, ip, id, public_addr, p2p_port);
+                            
+                            // Try P2P connection if public address and port are available
+                            if let (Some(ref pa), port) = (&public_addr, p2p_port) {
+                                if port > 0 {
+                                    if let Ok(ip_addr) = pa.parse::<IpAddr>() {
+                                        let addr = SocketAddr::new(ip_addr, port);
+                                        let pm = p2p_manager.clone();
+                                        let pid = id.clone();
+                                        tokio::spawn(async move {
+                                            if let Err(e) = pm.connect_to(pid.clone(), addr).await {
+                                                warn!("P2P connection failed to {}: {}", pid, e);
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+
+                            if let Some(ref tx) = peer_update_tx {
+                                let mut list: Vec<PeerInfo> = peers.values().cloned().collect();
+                                // Ensure the list includes newly joined peer if not yet in map
+                                if !peers.contains_key(&id) {
+                                     list.push(PeerInfo { 
+                                         id: id.clone(), 
+                                         ip: ip.clone(), 
+                                         public_addr: public_addr.clone(),
+                                         p2p_port,
+                                         name: name.clone(), 
+                                         os: os.clone(), 
+                                         version: version.clone(), 
+                                         device_type: device_type.clone(), 
+                                         is_gateway, 
+                                         connected_at,
+                                         route_status: "relay".to_string(),
+                                     });
+
+                                }
+                                let _ = tx.send(list).await;
+                            }
+                            
                             peers.insert(id.clone(), PeerInfo { 
-                                id: id.clone(), 
+                                id, 
                                 ip, 
+                                public_addr,
+                                p2p_port,
                                 name,
                                 os,
                                 version,
                                 device_type,
                                 is_gateway,
                                 connected_at,
+                                route_status: "relay".to_string(),
                             });
-                            
-                            if let Some(ref tx) = peer_update_tx {
-                                let list: Vec<PeerInfo> = peers.values().cloned().collect();
-                                let _ = tx.send(list).await;
-                            }
+
+
                         }
                         SignalMessage::PeerLeft { id } => {
                             info!("Peer Left: {}", id);
@@ -302,8 +359,9 @@ impl P2PNode {
                                 let _ = writer.write(&raw).await;
                             }
                         }
-                        SignalMessage::TunPacket { source: _, data, .. } => {
+                        SignalMessage::TunPacket { source, data, .. } => {
                              if let Ok(raw) = BASE64.decode(&data) {
+                                 info!("Received TunPacket from {}, writing {} bytes to TUN", source, raw.len());
                                  let mut writer = tun_writer.lock().await;
                                  let _ = writer.write(&raw).await;
                              }
@@ -396,7 +454,36 @@ impl P2PNode {
                     }
                 }
 
+                // Handle P2P Events
+                Some(event) = p2p_event_rx.recv() => {
+                    match event {
+                        p2p::P2PEvent::Connected(id) => {
+                            if let Some(peer) = peers.get_mut(&id) {
+                                info!("Peer {} switched to P2P connection", peer.name);
+                                peer.route_status = "p2p".to_string();
+                                
+                                if let Some(ref tx) = peer_update_tx {
+                                    let list: Vec<PeerInfo> = peers.values().cloned().collect();
+                                    let _ = tx.send(list).await;
+                                }
+                            }
+                        }
+                        p2p::P2PEvent::Disconnected(id) => {
+                            if let Some(peer) = peers.get_mut(&id) {
+                                info!("Peer {} lost P2P connection, falling back to relay", peer.name);
+                                peer.route_status = "relay".to_string();
+                                
+                                if let Some(ref tx) = peer_update_tx {
+                                    let list: Vec<PeerInfo> = peers.values().cloned().collect();
+                                    let _ = tx.send(list).await;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Read from TUN (Outbound traffic)
+
                 res = tun_reader.read(&mut buf) => {
                     match res {
                         Ok(0) => {
@@ -415,12 +502,68 @@ impl P2PNode {
                                 
                                 let is_vpn_traffic = dest_ip.octets()[0] == 10 && dest_ip.octets()[1] == 10;
                                 let is_broadcast = dest_ip.is_broadcast() || dest_ip.is_multicast();
+                                
+                                let mut handled = false;
 
-                                if !is_vpn_traffic && !is_broadcast {
+                                // 1. Try Unicast routing for VPN internal traffic (10.10.x.x)
+                                if is_vpn_traffic && !is_broadcast {
+                                    let target_peer = peers.values().find(|p| p.ip == dest_ip.to_string());
+                                    if let Some(peer) = target_peer {
+                                        let mut sent_p2p = false;
+                                        
+                                        // Try P2P first
+                                        if let Some(conn) = p2p_manager.get_connection(&peer.id).await {
+                                            // 1. Try Datagram (fast path)
+                                            if let Ok(_) = conn.send_datagram(packet_data.to_vec().into()) {
+                                                sent_p2p = true;
+                                            } else {
+                                                // 2. Fallback to Stream (for large packets or if datagrams are disabled)
+                                                match conn.open_uni().await {
+                                                    Ok(mut send) => {
+                                                        if let Ok(_) = send.write_all(packet_data).await {
+                                                            let _ = send.finish().await;
+                                                            sent_p2p = true;
+                                                        }
+                                                    }
+                                                    Err(e) => warn!("Failed to open P2P stream to {}: {}", peer.id, e),
+                                                }
+                                            }
+                                        }
+
+                                        if !sent_p2p {
+                                            if let Some(client) = &signal_client {
+                                                info!("Sending Unicast TunPacket to {} ({}) via Relay", peer.name, peer.ip);
+                                                let b64 = BASE64.encode(packet_data);
+                                                let _ = client.send(SignalMessage::TunPacket {
+                                                    target: peer.id.clone(),
+                                                    source: my_id.clone(),
+                                                    data: b64,
+                                                }).await;
+                                                
+                                                // Trigger P2P connection attempt if we have a public address
+                                                if let Some(public_addr) = &peer.public_addr {
+                                                    if let Ok(addr) = public_addr.parse::<std::net::SocketAddr>() {
+                                                        let pm = p2p_manager.clone();
+                                                        let pid = peer.id.clone();
+                                                        tokio::spawn(async move {
+                                                            let _ = pm.connect_to(pid, addr).await;
+                                                        });
+                                                    } else if let Ok(ip) = public_addr.parse::<std::net::IpAddr>() {
+                                                        // If it's just an IP, we might need a fixed port or have the port sent too
+                                                        // For now, let's assume the public_addr from DO might be just IP
+                                                        // Actually DO gives us the IP. We need the port.
+                                                        // Let's modify index.ts to include the port if available.
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        handled = true;
+                                    }
+                                }
+
+                                // 2. Try routing for external subnets (via gateway/services)
+                                if !handled && !is_vpn_traffic && !is_broadcast {
                                     if let Some(target_peer_id) = routes.get(&dest_ip) {
-                                         // For UDP, send TunPacket. For TCP, we should use SOCKS5 but user is using IP direct.
-                                         // This means TCP IP direct will FAIL here unless we use smoltcp.
-                                         // But user can use SOCKS5!
                                          if ipv4.protocol() == etherparse::IpNumber::UDP {
                                              if let Some(client) = &signal_client {
                                                  let b64 = BASE64.encode(packet_data);
@@ -431,20 +574,26 @@ impl P2PNode {
                                                  }).await;
                                              }
                                          }
-                                         continue;
+                                         handled = true;
                                     }
-                                    if let Some(gw) = &gateway {
-                                        let _ = gw.handle_packet(packet_data).await;
-                                        continue;
+                                    
+                                    if !handled {
+                                        if let Some(gw) = &gateway {
+                                            let _ = gw.handle_packet(packet_data).await;
+                                            handled = true;
+                                        }
                                     }
                                 }
 
-                                if let Some(client) = &signal_client {
-                                    let b64 = BASE64.encode(packet_data);
-                                    let _ = client.send(SignalMessage::Broadcast {
-                                        source: my_id.clone(),
-                                        data: b64,
-                                    }).await;
+                                // 3. Fallback to Broadcast for broadcast/multicast or unknown VPN destinations
+                                if !handled && (is_broadcast || is_vpn_traffic) {
+                                    if let Some(client) = &signal_client {
+                                        let b64 = BASE64.encode(packet_data);
+                                        let _ = client.send(SignalMessage::Broadcast {
+                                            source: my_id.clone(),
+                                            data: b64,
+                                        }).await;
+                                    }
                                 }
                             }
                         }

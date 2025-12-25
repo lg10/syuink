@@ -26,7 +26,8 @@ export default {
 				headers: {
 					"Access-Control-Allow-Origin": "*",
 					"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-					"Access-Control-Allow-Headers": "Content-Type",
+					"Access-Control-Allow-Headers": "Content-Type, Authorization",
+                    "Access-Control-Max-Age": "86400",
 				}
 			});
 		}
@@ -49,11 +50,17 @@ export default {
 			
 			if (url.pathname.startsWith('/wapi/')) {
 				const token = url.searchParams.get('token');
-				if (!token) return new Response('Unauthorized: Token required', { status: 401 });
+				if (!token) {
+                    console.error("[WS] Connection rejected: Missing token");
+                    return new Response('Unauthorized: Token required', { status: 401 });
+                }
 				
 				// Validate user
 				const user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(token).first();
-				if (!user) return new Response('Unauthorized: Invalid Token', { status: 401 });
+				if (!user) {
+                    console.error(`[WS] Connection rejected: Invalid token ${token}`);
+                    return new Response('Unauthorized: Invalid Token', { status: 401 });
+                }
 				
 				groupId = user.id as string;
                 console.log(`[WS] Resolved GroupID: ${groupId} from Token: ${token}`);
@@ -61,22 +68,25 @@ export default {
 				// API Access
 				// In real app, we should validate Authorization header here
 				const parts = url.pathname.split('/');
-				if (parts[2] === 'group' && parts[4] === 'devices') {
+				if (parts[2] === 'group') {
 					groupId = parts[3];
-                    console.log(`[API] Resolved GroupID: ${groupId} from URL`);
+                    console.log(`[API] Resolved GroupID: ${groupId} from /api/group/ URL: ${url.pathname}`);
 				} else {
+                    console.warn(`[API] Path not recognized: ${url.pathname}`);
 					return new Response('Not Found', { status: 404 });
 				}
+
 			}
+
+            if (!groupId) {
+                console.error(`[DO] Could not resolve groupId for path: ${url.pathname}`);
+                return new Response('Group not found', { status: 404 });
+            }
 
 		// Forward to DO
 		const id = env.SIGNAL_ROOM.idFromName(groupId);
-        console.log(`[DO] Accessing Room ID: ${id.toString()}`);
+        console.log(`[DO] Forwarding ${request.method} ${url.pathname} to Room ID: ${id.toString()} (Group: ${groupId})`);
 		const obj = env.SIGNAL_ROOM.get(id);
-
-        if (url.pathname.endsWith('/allocate_ip')) {
-             return obj.fetch(request);
-        }
 
 		return obj.fetch(request);
 
@@ -136,6 +146,8 @@ export class SignalRoom {
 	sessions: Map<WebSocket, { 
         id?: string, 
         ip?: string, 
+        public_addr?: string,
+        p2p_port?: number,
         name?: string, 
         os?: string, 
         version?: string, 
@@ -147,6 +159,11 @@ export class SignalRoom {
 	services: Map<string, any[]>; // PeerID -> List of ServiceDecl
     ipLeases: Map<string, { id?: string, ts: number }>; // ip -> lease info
 
+    private clamp(val: any, maxLen = 128) {
+        if (typeof val !== 'string') return '';
+        return val.slice(0, maxLen);
+    }
+
 	constructor(state: DurableObjectState, env: Env) {
 		this.state = state;
 		this.sessions = new Map();
@@ -156,69 +173,102 @@ export class SignalRoom {
 
 	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
+        
+        // Helper to add CORS to all DO responses
+        const corsHeaders = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        };
+
+        if (request.method === "OPTIONS") {
+            return new Response(null, { headers: corsHeaders });
+        }
 
 		// Handle API request to list devices
-		// Authorization helper: expect Bearer <groupId>
         const leaseTtlMs = 10 * 60 * 1000;
 		const parts = url.pathname.split('/');
-		const groupId = parts.length > 3 ? parts[3] : '';
+		
+        // For /api/group/:groupId/devices -> parts is ["", "api", "group", "{groupId}", "devices"]
+        // For /wapi/{groupId} -> parts is ["", "wapi", "{groupId}"]
+        let groupIdFromPath = "";
+        if (url.pathname.includes('/api/group/')) {
+            groupIdFromPath = parts[3] || "";
+        } else if (url.pathname.startsWith('/wapi/')) {
+            groupIdFromPath = parts[2] || "";
+        }
+
 		const authHeader = request.headers.get('Authorization') || '';
-		const expectedBearer = `Bearer ${groupId}`;
-		const authorized = !!groupId && authHeader === expectedBearer;
+		const token = authHeader.replace('Bearer ', '').trim();
+        
+        // Validation: For API calls, ensure token matches groupId
+        // WS connections are already validated by the main fetch handler before forwarding
+        const isWsUpgrade = request.headers.get('Upgrade') === 'websocket';
+        const authorized = isWsUpgrade || (!!groupIdFromPath && token === groupIdFromPath);
+
+        if (!isWsUpgrade) {
+            console.log(`[DO Auth] Path: ${url.pathname}, Group: ${groupIdFromPath}, Token: ${token ? 'present' : 'missing'}, Authorized: ${authorized}`);
+        }
 
         const pruneLeases = () => {
             const now = Date.now();
+            let count = 0;
             for (const [ip, lease] of this.ipLeases) {
                 if (now - lease.ts > leaseTtlMs) {
                     this.ipLeases.delete(ip);
+                    count++;
                 }
             }
+            if (count > 0) console.log(`[DO Lease] Pruned ${count} expired leases`);
         };
 
 		if (url.pathname.endsWith('/devices')) {
-            if (!authorized) return new Response('Unauthorized', { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
-            console.log(`[API] Listing devices. Total sessions: ${this.sessions.size}`);
+            if (!authorized) {
+                console.warn(`[API] Unauthorized /devices. Expected Bearer ${groupIdFromPath}, got ${authHeader}`);
+                return new Response('Unauthorized', { status: 401, headers: corsHeaders });
+            }
 			const devices = [];
 			for (const [_, meta] of this.sessions) {
-                console.log(`[API] Session Check: ID=${meta.id}, Name=${meta.name}, IP=${meta.ip}`);
-				if (meta.id) {
-					devices.push(meta);
-				}
+				if (meta.id) devices.push(meta);
 			}
-            console.log(`[API] Returning ${devices.length} devices`);
 			return new Response(JSON.stringify(devices), {
-				headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+				headers: { ...corsHeaders, "Content-Type": "application/json" }
 			});
 		}
 
 		if (url.pathname.endsWith('/allocate_ip')) {
-            if (!authorized) return new Response('Unauthorized', { status: 401, headers: { "Access-Control-Allow-Origin": "*" } });
+            if (!authorized) {
+                console.warn(`[API] Unauthorized /allocate_ip. Expected Bearer ${groupIdFromPath}, got ${authHeader}`);
+                return new Response('Unauthorized', { status: 401, headers: corsHeaders });
+            }
             pruneLeases();
 			const usedIps = new Set<string>();
 			for (const [_, meta] of this.sessions) {
 				if (meta.ip) usedIps.add(meta.ip);
 			}
-            for (const ip of this.ipLeases.keys()) {
+            for (const [ip, lease] of this.ipLeases) {
                 usedIps.add(ip);
             }
 			
-			// Find next free IP in 10.10.0.x starting from .2
 			let allocated = "";
 			for (let i = 2; i < 255; i++) {
 				const candidate = `10.10.0.${i}`;
 				if (!usedIps.has(candidate)) {
 					allocated = candidate;
-                    this.ipLeases.set(candidate, { id: `lease:${groupId}`, ts: Date.now() });
+                    this.ipLeases.set(candidate, { id: `lease:${groupIdFromPath}`, ts: Date.now() });
 					break;
 				}
 			}
+            
+            console.log(`[API] Allocated IP: ${allocated} for group: ${groupIdFromPath}`);
 			
-			if (!allocated) return new Response('No available IPs', { status: 507, headers: { "Access-Control-Allow-Origin": "*" } });
+			if (!allocated) return new Response('No available IPs', { status: 507, headers: corsHeaders });
 			
 			return new Response(JSON.stringify({ ip: allocated }), {
-				headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+				headers: { ...corsHeaders, "Content-Type": "application/json" }
 			});
 		}
+
 
 		// Handle WebSocket Upgrade
 		const upgradeHeader = request.headers.get('Upgrade');
@@ -229,18 +279,15 @@ export class SignalRoom {
 		const webSocketPair = new WebSocketPair();
 		const [client, server] = Object.values(webSocketPair);
 
+        const publicAddr = request.headers.get('CF-Connecting-IP') || 'unknown';
+
 		server.accept();
-		this.sessions.set(server, {}); // Empty metadata initially
-		console.log('New WebSocket connection established. Total sessions:', this.sessions.size);
+		this.sessions.set(server, { public_addr: publicAddr }); // Store public addr initially
+		console.log(`New WebSocket connection from ${publicAddr}. Total sessions:`, this.sessions.size);
 
 		server.addEventListener('message', (event) => {
 			this.handleMessage(server, event.data);
 		});
-
-        const clamp = (val: any, maxLen = 128) => {
-            if (typeof val !== 'string') return '';
-            return val.slice(0, maxLen);
-        };
 
 		server.addEventListener('close', () => {
             try {
@@ -337,10 +384,11 @@ export class SignalRoom {
 
 			// Intercept JOIN message to update metadata
 			if (msg.type === 'join') {
+                console.log(`[JOIN] Received join request from ${msg.id} (Name: ${msg.name}, IP: ${msg.ip})`);
 				// 0. Check for existing session with same ID and close it (Kick old session)
 				for (const [ws, existingMeta] of this.sessions) {
 					if (ws !== sender && existingMeta.id === msg.id) {
-						console.log(`Closing duplicate session for ${msg.id}`);
+						console.log(`[JOIN] Kicking duplicate session for ID: ${msg.id}`);
 						// Mark as replaced so close handler doesn't broadcast peer_left
 						existingMeta.replaced = true;
                         this.sessions.delete(ws); // Immediately remove from map to prevent race conditions
@@ -356,31 +404,38 @@ export class SignalRoom {
 					}
 				}
 
+				const existingSession = this.sessions.get(sender);
 				const meta = { 
-                    id: clamp(msg.id), 
-                    ip: clamp(msg.ip, 32), 
-                    name: clamp(msg.name),
-                    os: clamp(msg.os),
-                    version: clamp(msg.version),
-                    device_type: clamp(msg.device_type, 32),
+                    id: this.clamp(msg.id), 
+                    ip: this.clamp(msg.ip, 32), 
+                    public_addr: existingSession?.public_addr || 'unknown',
+                    p2p_port: Number(msg.p2p_port) || 0,
+                    name: this.clamp(msg.name),
+                    os: this.clamp(msg.os),
+                    version: this.clamp(msg.version),
+                    device_type: this.clamp(msg.device_type, 32),
                     is_gateway: !!msg.is_gateway,
                     connected_at: Date.now()
                 };
                 if (meta.ip) {
-                    pruneLeases();
+                    // Use a function that doesn't rely on captured scope for pruneLeases if possible, 
+                    // but here it's defined in fetch() so it's fine.
+                    const now = Date.now();
+                    for (const [ip, lease] of this.ipLeases) {
+                        if (now - lease.ts > 10 * 60 * 1000) {
+                            this.ipLeases.delete(ip);
+                        }
+                    }
                     this.ipLeases.set(meta.ip, { id: meta.id, ts: Date.now() });
                 }
 				this.sessions.set(sender, meta);
-				console.log(`Peer Joined: ${meta.name} (${meta.ip}) - OS: ${meta.os}`);
+				console.log(`[JOIN] Session stored. Total active sessions: ${this.sessions.size}`);
 
 				// 1. Send existing peers to the new joiner
-                console.log(`[JOIN] Sending existing peers to new client ${msg.id}`);
                 let sentCount = 0;
 				for (const [ws, otherMeta] of this.sessions) {
-                    const isSelf = ws === sender;
-                    console.log(`[JOIN] Checking peer ${otherMeta.id} (IsSelf: ${isSelf})`);
-					if (!isSelf && otherMeta.id) {
-                        console.log(`[JOIN] Sending peer ${otherMeta.id} to new client`);
+                    if (ws !== sender && otherMeta.id) {
+                        console.log(`[JOIN] Notifying joiner ${meta.id} about existing peer ${otherMeta.id}`);
                         this.safeSend(sender, JSON.stringify({
 							type: 'peer_joined',
 							...otherMeta
@@ -388,13 +443,15 @@ export class SignalRoom {
                         sentCount++;
 					}
 				}
-                console.log(`[JOIN] Sent ${sentCount} existing peers`);
+                console.log(`[JOIN] Sent ${sentCount} existing peers to ${meta.id}`);
+
 
 				// 1.5 Send existing services to new joiner
 				// We can just trigger a broadcast update to everyone including self, simplest way
 				this.broadcastServiceUpdate();
 
 				// 2. Broadcast this new peer to others (as peer_joined)
+                console.log(`[JOIN] Broadcasting new peer ${meta.id} to others`);
 				this.broadcast({
 					type: 'peer_joined',
 					...meta
@@ -407,12 +464,17 @@ export class SignalRoom {
             const targetId = msg.target_id || msg.target; // Support both fields
 			if (targetId) {
 				// Find target socket
+                let found = false;
 				for (const [ws, meta] of this.sessions) {
 					if (meta.id === targetId) {
                         this.safeSend(ws, data);
+                        found = true;
 						break;
 					}
 				}
+                if (!found) {
+                    console.warn(`[FORWARD] Target ${targetId} not found for message type: ${msg.type}`);
+                }
 			} else {
 				// Broadcast
 				this.broadcast(msg, sender);

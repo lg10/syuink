@@ -12,6 +12,7 @@ export interface PeerInfo {
     device_type?: string;
     is_gateway?: boolean;
     connected_at?: number;
+    route_status?: string;
     isSelf?: boolean;
 }
 

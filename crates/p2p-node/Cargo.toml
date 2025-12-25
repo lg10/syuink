@@ -15,8 +15,8 @@ bytes = { workspace = true }
 futures = { workspace = true }
 socket2.workspace = true
 uuid = { workspace = true }
-rustls = { version = "0.23", default-features = false, features = ["ring"] } 
-# Ring is often easier to setup than opennamespaced-ssl for cross-platform
+rustls = { version = "0.21", features = ["quic", "dangerous_configuration"] }
+
 tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
 url = "2.5"
 serde_json = { workspace = true }
@@ -24,6 +24,8 @@ base64 = "0.22.1"
 etherparse = "0.19.0"
 ipnetwork = "0.21.1"
 smoltcp = "0.12.0"
+rcgen = { workspace = true }
+
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.178"

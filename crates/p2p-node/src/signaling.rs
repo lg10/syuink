@@ -24,7 +24,10 @@ pub enum SignalMessage {
         ip: String,
         name: String,
         #[serde(default)]
+        p2p_port: u16,
+        #[serde(default)]
         os: Option<String>,
+
         #[serde(default)]
         version: Option<String>,
         #[serde(default)]
@@ -46,6 +49,10 @@ pub enum SignalMessage {
     PeerJoined {
         id: String,
         ip: String,
+        #[serde(default)]
+        public_addr: Option<String>,
+        #[serde(default)]
+        p2p_port: u16,
         name: String,
         #[serde(default)]
         os: Option<String>,
@@ -135,6 +142,7 @@ impl SignalingClient {
         my_id: String,
         my_ip: String,
         my_name: String,
+        p2p_port: u16,
         my_meta: (Option<String>, Option<String>, Option<String>, bool), // os, ver, type, gateway
         incoming_tx: mpsc::Sender<SignalMessage>,
     ) -> Result<Self> {
@@ -161,6 +169,7 @@ impl SignalingClient {
             id: my_id.clone(),
             ip: my_ip,
             name: my_name,
+            p2p_port,
             os: my_meta.0,
             version: my_meta.1,
             device_type: my_meta.2,

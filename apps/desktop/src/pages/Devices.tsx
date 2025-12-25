@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Monitor, Wifi, Server, Smartphone, Laptop, Clock } from "lucide-react";
+import { ArrowLeft, Monitor, Wifi, Server, Smartphone, Laptop, Clock, Zap, Repeat } from "lucide-react";
 import { useVPN } from "../context/VPNContext";
+
 
 const formatDuration = (start?: number) => {
     if (!start) return "刚刚";
@@ -101,8 +102,24 @@ function Devices() {
                             {device.isSelf && (
                                 <span style={{ backgroundColor: '#007bff', color: 'white', fontSize: '12px', padding: '2px 8px', borderRadius: '10px' }}>本机</span>
                             )}
+                            {!device.isSelf && (
+                                <span style={{ 
+                                    backgroundColor: device.route_status === 'p2p' ? '#28a745' : '#ffc107', 
+                                    color: 'white', 
+                                    fontSize: '12px', 
+                                    padding: '2px 8px', 
+                                    borderRadius: '10px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                }}>
+                                    {device.route_status === 'p2p' ? <Zap size={10} /> : <Repeat size={10} />}
+                                    {device.route_status === 'p2p' ? '直连' : '转发'}
+                                </span>
+                            )}
                         </div>
                     </div>
+
                     
                     <h3 style={{ margin: '0 0 5px 0', fontSize: '16px' }}>{device.name}</h3>
                     

@@ -1,6 +1,6 @@
 {
   "name": "syuink-monorepo",
-  "version": "0.0.7",
+  "version": "0.0.12",
   "private": true,
   "workspaces": [
     "apps/*"
