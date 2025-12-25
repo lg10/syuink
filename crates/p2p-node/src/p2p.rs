@@ -161,55 +161,59 @@ impl P2PManager {
                             }
                         };
 
-                    info!("P2P handshake successful from peer: {}", peer_id);
-                    {
-                        let mut conns = connections.lock().await;
-                        conns.insert(peer_id.clone(), connection.clone());
-                    }
-                    let _ = event_tx.send(P2PEvent::Connected(peer_id.clone())).await;
+                        info!("P2P handshake successful from peer: {}", peer_id);
+                        {
+                            let mut conns = connections.lock().await;
+                            conns.insert(peer_id.clone(), connection.clone());
+                        }
+                        let _ = event_tx.send(P2PEvent::Connected(peer_id.clone())).await;
 
-                    // Monitor disconnection
-                    let etx = event_tx.clone();
-                    let pid = peer_id.clone();
-                    let conns_clone = connections.clone();
-                    let conn_clone = connection.clone();
-                    tokio::spawn(async move {
-                        let _ = conn_clone.closed().await;
-                        info!("P2P connection from {} closed", pid);
-                        let mut conns = conns_clone.lock().await;
-                        conns.remove(&pid);
-                        let _ = etx.send(P2PEvent::Disconnected(pid)).await;
-                    });
+                        // Monitor disconnection
+                        let etx = event_tx.clone();
+                        let pid = peer_id.clone();
+                        let conns_clone = connections.clone();
+                        let conn_clone = connection.clone();
+                        tokio::spawn(async move {
+                            let _ = conn_clone.closed().await;
+                            info!("P2P connection from {} closed", pid);
+                            let mut conns = conns_clone.lock().await;
+                            conns.remove(&pid);
+                            let _ = etx.send(P2PEvent::Disconnected(pid)).await;
+                        });
 
-                    // Handle Datagrams (Fast path for IP packets)
-                    let tw_dg = tun_writer.clone();
-                    let conn_dg = connection.clone();
-                    tokio::spawn(async move {
+                        // Handle Datagrams (Fast path for IP packets)
+                        let tw_dg = tun_writer.clone();
+                        let conn_dg = connection.clone();
+                        tokio::spawn(async move {
+                            loop {
+                                match conn_dg.read_datagram().await {
+                                    Ok(dg) => {
+                                        let mut writer = tw_dg.lock().await;
+                                        let _ = writer.write_all(&dg).await;
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                        });
+
+                        // Handle Unidirectional Streams (Fallback/Large packets)
                         loop {
-                            match conn_dg.read_datagram().await {
-                                Ok(dg) => {
-                                    let mut writer = tw_dg.lock().await;
-                                    let _ = writer.write_all(&dg).await;
+                            match connection.accept_uni().await {
+                                Ok(mut recv) => {
+                                    let tun_writer = tun_writer.clone();
+                                    tokio::spawn(async move {
+                                        if let Ok(buf) = recv.read_to_end(65535).await {
+                                            let mut writer = tun_writer.lock().await;
+                                            let _ = writer.write_all(&buf).await;
+                                        }
+                                    });
                                 }
                                 Err(_) => break,
                             }
                         }
-                    });
-
-                    // Handle Unidirectional Streams (Fallback/Large packets)
-                    loop {
-                        match connection.accept_uni().await {
-                            Ok(mut recv) => {
-                                let tun_writer = tun_writer.clone();
-                                tokio::spawn(async move {
-                                    if let Ok(buf) = recv.read_to_end(65535).await {
-                                        let mut writer = tun_writer.lock().await;
-                                        let _ = writer.write_all(&buf).await;
-                                    }
-                                });
-                            }
-                            Err(_) => break,
-                        }
+                    }
+                    Err(e) => {
+                        warn!("[P2P] Failed to accept QUIC connection from {}: {}", remote_addr, e);
                     }
                 }
             });
