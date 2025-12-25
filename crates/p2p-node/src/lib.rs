@@ -211,6 +211,11 @@ impl P2PNode {
         {
             info!("Configuring Wintun interface 'Syuink' with IP {}...", allocated_ip);
             
+            // 0. Ensure interface is enabled
+            let _ = std::process::Command::new("powershell")
+                .args(&["-Command", "Enable-NetAdapter -Name Syuink -Confirm:$false -ErrorAction SilentlyContinue"])
+                .output();
+
             // 1. Set IP address and mask (this also adds the subnet route)
             let _ = std::process::Command::new("netsh")
                 .args(&["interface", "ip", "set", "address", "name=Syuink", "static", &allocated_ip, "255.255.255.0", "none"])
@@ -224,6 +229,11 @@ impl P2PNode {
             // 3. Force add the specific route just in case
             let _ = std::process::Command::new("route")
                 .args(&["add", "10.251.0.0", "mask", "255.255.255.0", &allocated_ip, "metric", "1"])
+                .output();
+
+            // 4. Set network category to Private to bypass default firewall rules
+            let _ = std::process::Command::new("powershell")
+                .args(&["-Command", "Get-NetConnectionProfile -InterfaceAlias Syuink -ErrorAction SilentlyContinue | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue"])
                 .output();
         }
 
@@ -372,6 +382,8 @@ impl P2PNode {
                                  if let Err(e) = writer.write_all(&raw).await {
                                      error!("[Relay] Failed to write TunPacket to TUN: {}", e);
                                  }
+                             } else {
+                                 error!("[Relay] Failed to decode TunPacket data from {}", source);
                              }
                         }
                         SignalMessage::TcpConnect { stream_id, source: source_peer, target_ip, target_port, .. } => {
@@ -517,7 +529,6 @@ impl P2PNode {
                                 let is_broadcast = dest_ip.is_broadcast() || dest_ip.is_multicast() || dest_ip.octets()[3] == 255;
                                 let mut handled = false;
 
-                                // 1. Try Unicast routing for VPN internal traffic (10.251.0.x)
                                 if is_vpn_traffic && !is_broadcast {
                                     // Match peer by IP
                                     let target_peer = peers.values().find(|p| p.ip == dest_ip.to_string());
@@ -534,7 +545,7 @@ impl P2PNode {
 
                                         if !sent_p2p {
                                             if let Some(client) = &signal_client {
-                                                info!("[Relay] Forwarding packet to {} ({}) via Server", peer.name, peer.ip);
+                                                debug!("[Relay] Forwarding {} bytes to {} ({}) via Server", packet_data.len(), peer.name, peer.ip);
                                                 let b64 = BASE64.encode(packet_data);
                                                 let _ = client.send(SignalMessage::TunPacket {
                                                     target: peer.id.clone(),
@@ -545,7 +556,9 @@ impl P2PNode {
                                         }
                                         handled = true;
                                     } else {
-                                        debug!("[TUN] No peer found for IP {}", dest_ip);
+                                        // If not in peers map, it might be a response to someone we don't know yet (unlikely)
+                                        // or a configuration issue. We log it.
+                                        warn!("[TUN] No peer found for unicast IP: {}", dest_ip);
                                     }
                                 }
 
