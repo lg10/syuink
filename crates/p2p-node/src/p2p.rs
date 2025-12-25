@@ -62,23 +62,31 @@ impl P2PManager {
             }
         }
         
-        info!("Attempting P2P connection to {} at {}", peer_id, addr);
+        info!("[P2P] Attempting direct QUIC connection to peer {} at {}", peer_id, addr);
         
         let client_cfg = make_client_config();
+        // Set a shorter timeout for P2P attempts to fail fast and fallback to relay
         let conn_res = self.endpoint.connect_with(client_cfg, addr, "syuink-p2p");
         
         let conn = match conn_res {
             Ok(connecting) => {
-                match connecting.await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        warn!("QUIC connection attempt failed to {}: {}", peer_id, e);
+                match tokio::time::timeout(std::time::Duration::from_secs(5), connecting).await {
+                    Ok(Ok(c)) => {
+                        info!("[P2P] Successfully established QUIC connection to {}", peer_id);
+                        c
+                    },
+                    Ok(Err(e)) => {
+                        warn!("[P2P] QUIC handshake failed to {}: {}. This usually means NAT/Firewall blocked the UDP packet.", peer_id, e);
                         return Err(anyhow::anyhow!("QUIC connection failed: {}", e));
+                    }
+                    Err(_) => {
+                        warn!("[P2P] QUIC connection to {} timed out after 5s. Likely Symmetric NAT or firewall.", peer_id);
+                        return Err(anyhow::anyhow!("QUIC connection timeout"));
                     }
                 }
             }
             Err(e) => {
-                warn!("Failed to initiate QUIC connection to {}: {}", peer_id, e);
+                warn!("[P2P] Failed to initiate QUIC connection to {}: {}", peer_id, e);
                 return Err(anyhow::anyhow!("QUIC initiation failed: {}", e));
             }
         };
@@ -124,25 +132,34 @@ impl P2PManager {
         tun_writer: Arc<tokio::sync::Mutex<tokio::io::WriteHalf<tun_device::AsyncDevice>>>,
         event_tx: tokio::sync::mpsc::Sender<P2PEvent>,
     ) {
+        info!("[P2P] Accept loop started, waiting for incoming UDP/QUIC connections...");
         while let Some(conn) = endpoint.accept().await {
             let tun_writer = tun_writer.clone();
             let connections = connections.clone();
             let event_tx = event_tx.clone();
 
             tokio::spawn(async move {
-                if let Ok(connection) = conn.await {
-                    info!("Accepted P2P connection from {}", connection.remote_address());
-                    
-                    // 1. Handshake: Receive peer ID
-                    let peer_id = match connection.accept_uni().await {
-                        Ok(mut recv) => {
-                            match recv.read_to_end(64).await {
-                                Ok(id_bytes) => String::from_utf8_lossy(&id_bytes).to_string(),
-                                Err(_) => return,
+                let remote_addr = conn.remote_address();
+                match conn.await {
+                    Ok(connection) => {
+                        info!("[P2P] Accepted incoming connection from {}", remote_addr);
+                        
+                        // 1. Handshake: Receive peer ID
+                        let peer_id = match connection.accept_uni().await {
+                            Ok(mut recv) => {
+                                match recv.read_to_end(64).await {
+                                    Ok(id_bytes) => String::from_utf8_lossy(&id_bytes).to_string(),
+                                    Err(e) => {
+                                        warn!("[P2P] Failed to read handshake ID from {}: {}", remote_addr, e);
+                                        return;
+                                    }
+                                }
                             }
-                        }
-                        Err(_) => return,
-                    };
+                            Err(e) => {
+                                warn!("[P2P] Failed to accept handshake stream from {}: {}", remote_addr, e);
+                                return;
+                            }
+                        };
 
                     info!("P2P handshake successful from peer: {}", peer_id);
                     {
