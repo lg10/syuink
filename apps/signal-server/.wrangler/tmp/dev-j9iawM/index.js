@@ -252,7 +252,7 @@ var SignalRoom = class {
     }
     const webSocketPair = new WebSocketPair();
     const [client, server] = Object.values(webSocketPair);
-    const publicAddr = request.headers.get("CF-Connecting-IP") || "unknown";
+    const publicAddr = request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For")?.split(",")[0].trim() || "unknown";
     server.accept();
     this.sessions.set(server, { public_addr: publicAddr });
     console.log(`New WebSocket connection from ${publicAddr}. Total sessions:`, this.sessions.size);

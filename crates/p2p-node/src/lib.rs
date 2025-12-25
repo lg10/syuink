@@ -541,7 +541,7 @@ impl P2PNode {
 
                                         if !sent_p2p {
                                             if let Some(client) = &signal_client {
-                                                info!("Sending Unicast TunPacket to {} ({}) via Relay", peer.name, peer.ip);
+                                                info!("Sending Unicast TunPacket to {} ({}) via Relay (P2P not connected)", peer.name, peer.ip);
                                                 let b64 = BASE64.encode(packet_data);
                                                 let _ = client.send(SignalMessage::TunPacket {
                                                     target: peer.id.clone(),
@@ -551,7 +551,7 @@ impl P2PNode {
                                                 
                                                 // Trigger P2P connection attempt if we have a public address
                                                 if let (Some(ref pa), port) = (&peer.public_addr, peer.p2p_port) {
-                                                    if port > 0 && pa != "unknown" {
+                                                    if port > 0 && pa != "unknown" && !pa.starts_with("172.") && !pa.starts_with("127.") {
                                                         if let Ok(ip_addr) = pa.parse::<IpAddr>() {
                                                             let addr = SocketAddr::new(ip_addr, port);
                                                             let pm = p2p_manager.clone();
@@ -560,11 +560,13 @@ impl P2PNode {
                                                                 let _ = pm.connect_to(pid, addr).await;
                                                             });
                                                         }
+                                                    } else {
+                                                        warn!("P2P skipped for {}: Invalid public IP {:?}", peer.name, pa);
                                                     }
                                                 }
-
                                             }
                                         }
+
                                         handled = true;
                                     }
                                 }
