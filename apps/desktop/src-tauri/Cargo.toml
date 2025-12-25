@@ -4,17 +4,19 @@ version = "0.1.0"
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "2.0.0-beta", features = [] }
+tauri-build = { version = "2.0.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0.0-beta", features = ["macos-private-api", "tray-icon", "image-png", "image-ico"] }
+tauri = { version = "2.0.0", features = ["tray-icon", "image-png", "image-ico", "macos-private-api"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 p2p-node = { path = "../../../crates/p2p-node" }
 tokio = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
-sysinfo = "0.37.2"
-tauri-plugin-single-instance = "2.0.0-beta"
+sysinfo = "0.32"
+tauri-plugin-single-instance = "2.0.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2.178"
 objc2 = "0.5.2"
 objc2-app-kit = "0.2.2"
