@@ -70,7 +70,7 @@ async fn start_vpn(
     println!("Request to start VPN for device: {} (ID: {})", name, my_id);
     
     // Use provided IP or default to .2
-    let start_ip_str = ip.unwrap_or_else(|| "10.10.0.2".to_string()); 
+    let start_ip_str = ip.unwrap_or_else(|| "10.251.0.2".to_string()); 
     
     let ip_addr: Ipv4Addr = start_ip_str.parse().map_err(|e| format!("IP格式错误: {}", e))?;
     let mask: Ipv4Addr = "255.255.255.0".parse().unwrap();
@@ -468,6 +468,9 @@ async fn set_proxy_mode_menu(state: State<'_, VpnState>, mode: String) -> Result
 }
 
 fn main() {
+    // Initialize logging
+    tracing_subscriber::fmt::init();
+
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;

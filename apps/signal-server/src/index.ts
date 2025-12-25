@@ -252,7 +252,7 @@ export class SignalRoom {
 			
 			let allocated = "";
 			for (let i = 2; i < 255; i++) {
-				const candidate = `10.10.0.${i}`;
+				const candidate = `10.251.0.${i}`;
 				if (!usedIps.has(candidate)) {
 					allocated = candidate;
                     this.ipLeases.set(candidate, { id: `lease:${groupIdFromPath}`, ts: Date.now() });
